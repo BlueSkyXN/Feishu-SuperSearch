@@ -1,11 +1,11 @@
-# Implementation Status — v1 实现候选（Unreleased）
+# Implementation Status — v1.0.1
 
 状态日期：2026-07-30
 版本：1.0.1
 
 ## 当前开发状态
 
-本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。当前版本尚未满足全部发布门槛，不标记为完整交付。
+本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。本文记录 `v1.0.1` 的源码能力与截至状态日期的本地/真实租户验收快照；GitHub CI、Tag 和 Release 是动态状态，不在静态文档中硬编码为成功，请按具体 SHA 从 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 与 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 回读。
 
 | 模块 | 状态 | 说明 |
 |---|---:|---|
@@ -30,8 +30,8 @@
 | MCP | 本机测试通过 | 10 个工具，含 `feishu_ask` |
 | Go Client | 完成 | HTTP Client |
 | Examples/Docs | 完成 | Quickstart、配置、CLI、HTTP、MCP、Plan、运维、开发、测试、发布 |
-| Cross-platform build | GitHub Actions 已配置/远程未验证 | 六目标 GOOS/GOARCH、CGO/trimpath、嵌入 version/commit 由 CI 与 Release verifier 回读；正式资产不在本机构建 |
-| GitHub Actions | 本地配置检查通过/远程未验证 | Workflow 已接入 Verify、Web/E2E、coverage gate、三平台原生构建、Docker、NPM audit、Govulncheck、CodeQL 与 Tag Release |
+| Cross-platform build | GitHub Actions 门禁 | 六目标 GOOS/GOARCH、CGO/trimpath、嵌入 version/commit 由 CI 与 Release verifier 回读；正式资产不在本机构建 |
+| GitHub Actions | 已配置 | Workflow 已接入 Verify、Web/E2E、coverage gate、三平台原生构建、Docker、Gitleaks、NPM audit、Govulncheck、CodeQL 与 Tag Release；运行终态以 exact SHA 为准 |
 | Repository metadata | 完成 | Dependabot、Issue/PR Template、贡献与安全策略 |
 
 ## 当前验证快照
@@ -47,13 +47,12 @@ lark-cli exact-worktree：Doctor、Continue、Docs Fetch、Messages Context/Rela
 lark-cli Search：7 ok / 2 missing_scope；真实对象与响应均未写入仓库
 lark-cli blockers：calendar/mail = missing_scope；Base/Sheets = 缺测试对象
 direct OpenAPI live：未执行，当前没有同时可用的 App ID 与 user access token
-GitHub exact-head CI / CodeQL：未执行
-正式 Release：尚未创建；必须由 Tag workflow 生成 9 个 GitHub Release 资产并远程回读
+GitHub exact-head CI / CodeQL / Release：动态远程状态，不以本文快照代替 Actions、Tag 和 9 个 Release 资产回读
 ```
 
 上述 Web、HTTP 和 coverage 是本机当前工作区证据，不等同于远程 exact-head CI。lark-cli 的 7 个成功来源也不能代表全部 11 个来源通过。
 
-## 发布前仍需完成或在发布 head 重跑
+## 每个发布 head 必须重跑
 
 统一门槛：
 

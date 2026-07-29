@@ -59,7 +59,7 @@
 - Security workflow 增加 Gitleaks exact-head 扫描；许可证 manifest 只精确豁免已校验的 SHA-256 行
 - lark-cli 真实只读验证中 docs/messages/chats/people/minutes/meetings/tasks 成功；calendar/mail 为 `missing_scope`；Base/Sheets 缺测试对象
 - direct OpenAPI 仅完成 httptest；因没有同时可用的 App ID 与 user access token，未做真实租户验收
-- 当前 exact-head GitHub CI、CodeQL 和 Tag Release 尚未运行
+- GitHub CI、CodeQL、Tag 与 Release 属于动态交付证据，不在 Changelog 中固化状态；必须按 exact SHA 从 Actions 和 9 个 Release 资产回读
 - 固定构建参数下两组 9 个候选文件逐字节一致；source archive 与安全工作树一致且解压后 `make verify` 通过
 
 ### Documentation
