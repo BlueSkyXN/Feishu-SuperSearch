@@ -8,7 +8,7 @@ RUN go test ./... && CGO_ENABLED=0 go build -buildvcs=false -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.builtAt=${BUILT_AT}" \
     -o /out/sfs ./cmd/sfs
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN adduser -D -u 10001 sfs
 USER sfs
 WORKDIR /home/sfs
