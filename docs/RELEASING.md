@@ -31,7 +31,7 @@ docs/IMPLEMENTATION_STATUS.md
 检查：
 
 ```bash
-./scripts/check-version.sh 1.0.1
+./scripts/check-version.sh 1.0.2
 ```
 
 ## 3. PR 门禁
@@ -67,8 +67,8 @@ git rev-parse HEAD
 创建并推送 Tag：
 
 ```bash
-git tag -a v1.0.1 -m "SuperFeishuSearch 1.0.1"
-git push origin v1.0.1
+git tag -a v1.0.2 -m "SuperFeishuSearch 1.0.2"
+git push origin v1.0.2
 ```
 
 Release workflow 会重新验证 Tag commit 等于触发发布时的 `origin/main` head。Tag 指向旧的 main 历史提交、版本不匹配、测试失败、资产不完整或同名 Release 已存在时，发布直接失败。
@@ -85,36 +85,36 @@ Release workflow 会重新验证 Tag commit 等于触发发布时的 `origin/mai
 6. 65%/75% coverage gate；
 7. HTTP/Web smoke；
 8. `make package-only`；
-9. `make release-verify`；
+9. `make release-verify`，并在无 `.git` 的临时目录中物化源码 ZIP、重新执行完整 `make verify`；
 10. 上传含 run ID/attempt 的不可变 Actions artifact。
 
-`publish` Job 只有 `contents: write`。它下载已验证 bundle，再次执行 `make release-verify`，然后用 `gh release create --verify-tag` 创建 Release。
+`publish` Job 只有 `contents: write`。它下载已验证 bundle，以 `ARCHIVE_EXECUTION=skip` 再次执行被动 `make release-verify`，不会运行归档内的二进制或源码；复核通过后才用 `gh release create --verify-tag` 创建 Release。
 
 ## 6. 精确资产集合
 
 GitHub Release 必须恰好包含：
 
 ```text
-SuperFeishuSearch-1.0.1-linux-amd64.tar.gz
-SuperFeishuSearch-1.0.1-linux-arm64.tar.gz
-SuperFeishuSearch-1.0.1-darwin-amd64.tar.gz
-SuperFeishuSearch-1.0.1-darwin-arm64.tar.gz
-SuperFeishuSearch-1.0.1-windows-amd64.zip
-SuperFeishuSearch-1.0.1-windows-arm64.zip
-SuperFeishuSearch-1.0.1-source.tar.gz
-SuperFeishuSearch-1.0.1-source.zip
+SuperFeishuSearch-1.0.2-linux-amd64.tar.gz
+SuperFeishuSearch-1.0.2-linux-arm64.tar.gz
+SuperFeishuSearch-1.0.2-darwin-amd64.tar.gz
+SuperFeishuSearch-1.0.2-darwin-arm64.tar.gz
+SuperFeishuSearch-1.0.2-windows-amd64.zip
+SuperFeishuSearch-1.0.2-windows-arm64.zip
+SuperFeishuSearch-1.0.2-source.tar.gz
+SuperFeishuSearch-1.0.2-source.zip
 SHA256SUMS
 ```
 
-`scripts/verify-release.py` 检查压缩包安全路径、无 symlink、运行文档和 `config.demo.json`、仓库完整 `LICENSES/` 与逐文件 SHA-256、六平台 build metadata、完整 commit、Linux amd64 Demo smoke、源码 ZIP/TAR 一致性、Git tracked tree 一致性和敏感路径排除。
+`scripts/verify-release.py` 检查压缩包安全路径、无 symlink、运行文档和 `config.demo.json`、仓库完整 `LICENSES/` 与逐文件 SHA-256、六平台 build metadata、完整 commit、Linux amd64 Demo smoke、源码 ZIP/TAR 文件内容和模式一致性、与 Git HEAD 全部 tracked blob 的内容和模式一致性，以及敏感路径排除。随后它会安全物化源码 ZIP、恢复可执行位，并在没有 `.git` 元数据的目录中执行完整 `make verify`；任何失败都会阻止 Actions artifact 和 GitHub Release。
 
 ## 7. 发布后远程回读
 
 ```bash
 gh run list --workflow release.yml --limit 10
-gh release view v1.0.1 --json tagName,url,assets
+gh release view v1.0.2 --json tagName,url,assets
 tmp="$(mktemp -d)"
-gh release download v1.0.1 --dir "$tmp"
+gh release download v1.0.2 --dir "$tmp"
 (cd "$tmp" && sha256sum -c SHA256SUMS)
 ```
 
@@ -148,11 +148,17 @@ self-hosted,sfs-live runner
 维护者确有需要时可在干净 Git checkout 执行：
 
 ```bash
-make package VERSION=1.0.1
-make release-verify VERSION=1.0.1 COMMIT="$(git rev-parse HEAD)"
+make package VERSION=1.0.2
+make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)"
 ```
 
-打包脚本要求 clean worktree，并用 `git archive HEAD` 生成 source archive。普通用户无需运行这些命令。
+默认 `ARCHIVE_EXECUTION=required` 会执行 Linux amd64 运行包和源码包，必须在 Linux amd64 环境运行。macOS 或其他维护机只验证源码执行路径时，使用：
+
+```bash
+make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)" ARCHIVE_EXECUTION=source
+```
+
+`ARCHIVE_EXECUTION=skip` 只允许做被动结构和内容复核，不能替代正式发布的主动门禁。打包脚本要求 clean worktree，并用 `git archive HEAD` 生成 source archive。普通用户无需运行这些命令，正式资产仍只由 GitHub Actions 生成。
 
 ## 10. 回滚
 

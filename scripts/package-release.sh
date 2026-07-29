@@ -112,6 +112,10 @@ git -C "$ROOT" archive --format=tar HEAD | tar -xf - -C "$SOURCE_DIR"
 python3 "$ROOT/scripts/archive-release.py" --input "$SOURCE_DIR" --output "$OUT/$SOURCE_NAME.tar.gz" --epoch "$SOURCE_DATE_EPOCH"
 python3 "$ROOT/scripts/archive-release.py" --input "$SOURCE_DIR" --output "$OUT/$SOURCE_NAME.zip" --epoch "$SOURCE_DATE_EPOCH"
 
+if [[ -e "$OUT/.DS_Store" || -L "$OUT/.DS_Store" ]]; then
+  unlink "$OUT/.DS_Store"
+fi
+
 (
   cd "$OUT"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -126,4 +130,7 @@ python3 "$ROOT/scripts/archive-release.py" --input "$SOURCE_DIR" --output "$OUT/
   done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS | LC_ALL=C sort)
 )
 rm -rf "$WORK"
+if [[ -e "$OUT/.DS_Store" || -L "$OUT/.DS_Store" ]]; then
+  unlink "$OUT/.DS_Store"
+fi
 echo "Release artifacts written to $OUT"

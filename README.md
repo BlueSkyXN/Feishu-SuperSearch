@@ -76,30 +76,30 @@ Entrypoints
 
 | 系统 | 资产 |
 |---|---|
-| macOS Apple Silicon | `SuperFeishuSearch-1.0.1-darwin-arm64.tar.gz` |
-| macOS Intel | `SuperFeishuSearch-1.0.1-darwin-amd64.tar.gz` |
-| Linux x86-64 | `SuperFeishuSearch-1.0.1-linux-amd64.tar.gz` |
-| Linux ARM64 | `SuperFeishuSearch-1.0.1-linux-arm64.tar.gz` |
-| Windows x86-64 | `SuperFeishuSearch-1.0.1-windows-amd64.zip` |
-| Windows ARM64 | `SuperFeishuSearch-1.0.1-windows-arm64.zip` |
+| macOS Apple Silicon | `SuperFeishuSearch-1.0.2-darwin-arm64.tar.gz` |
+| macOS Intel | `SuperFeishuSearch-1.0.2-darwin-amd64.tar.gz` |
+| Linux x86-64 | `SuperFeishuSearch-1.0.2-linux-amd64.tar.gz` |
+| Linux ARM64 | `SuperFeishuSearch-1.0.2-linux-arm64.tar.gz` |
+| Windows x86-64 | `SuperFeishuSearch-1.0.2-windows-amd64.zip` |
+| Windows ARM64 | `SuperFeishuSearch-1.0.2-windows-arm64.zip` |
 
 macOS/Linux：
 
 ```bash
-tar -xzf SuperFeishuSearch-1.0.1-<os>-<arch>.tar.gz
-cd SuperFeishuSearch-1.0.1-<os>-<arch>
+tar -xzf SuperFeishuSearch-1.0.2-<os>-<arch>.tar.gz
+cd SuperFeishuSearch-1.0.2-<os>-<arch>
 ./sfs version
 ```
 
 Windows PowerShell：
 
 ```powershell
-Expand-Archive .\SuperFeishuSearch-1.0.1-windows-amd64.zip
-cd .\SuperFeishuSearch-1.0.1-windows-amd64
+Expand-Archive .\SuperFeishuSearch-1.0.2-windows-amd64.zip
+cd .\SuperFeishuSearch-1.0.2-windows-amd64
 .\sfs.exe version
 ```
 
-`SHA256SUMS` 覆盖 8 个压缩资产。Release workflow 会验证精确资产集合、校验和、六平台 `GOOS/GOARCH`、`CGO_ENABLED=0`、`trimpath`、嵌入版本/commit、源码包与 Git tracked tree 一致性，以及 Linux amd64 离线 smoke。
+`SHA256SUMS` 覆盖 8 个压缩资产。Release workflow 会验证精确资产集合、校验和、六平台 `GOOS/GOARCH`、`CGO_ENABLED=0`、`trimpath`、嵌入版本/commit、源码包与 Git tracked tree 一致性、源码包在无 `.git` 环境下完整执行 `make verify`，以及 Linux amd64 离线 smoke。
 
 ## 3. 完整离线预览
 

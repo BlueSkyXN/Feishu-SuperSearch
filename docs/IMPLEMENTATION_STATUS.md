@@ -1,11 +1,11 @@
-# Implementation Status — v1.0.1
+# Implementation Status — v1.0.2
 
 状态日期：2026-07-30
-版本：1.0.1
+版本：1.0.2
 
 ## 当前开发状态
 
-本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。本文记录 `v1.0.1` 的源码能力与截至状态日期的本地/真实租户验收快照；GitHub CI、Tag 和 Release 是动态状态，不在静态文档中硬编码为成功，请按具体 SHA 从 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 与 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 回读。
+本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。本文记录 `v1.0.2` 的源码能力与截至状态日期的本地/真实租户验收快照；GitHub CI、Tag 和 Release 是动态状态，不在静态文档中硬编码为成功，请按具体 SHA 从 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 与 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 回读。
 
 | 模块 | 状态 | 说明 |
 |---|---:|---|
@@ -41,7 +41,7 @@
 ```text
 Web：unit/typecheck/build/static drift/Playwright E2E 通过
 HTTP/Web smoke：通过
-coverage：整仓 71.9%（5409/7525），核心 76.5%（2153/2816），通过 65%/75% gate
+coverage：整仓 71.9%（5412/7528），核心 76.5%（2156/2819），通过 65%/75% gate
 lark-cli live：docs/messages/chats/people/minutes/meetings/tasks 成功
 lark-cli exact-worktree：Doctor、Continue、Docs Fetch、Messages Context/Relations Fetch、Minutes Summary/Structure/Content Fetch、Tasks Fetch、People Resolve、Meeting Expand 均通过
 lark-cli Search：7 ok / 2 missing_scope；真实对象与响应均未写入仓库
@@ -72,7 +72,7 @@ record/replay smoke
 HTTP/Web smoke（本机当前已通过，发布 head 仍需重跑）
 MCP smoke
 真实飞书只读矩阵
-cross-platform build + source archive re-verify + SHA-256 readback（必须由 GitHub Release workflow 执行）
+cross-platform build + source archive 无 `.git` 完整 `make verify` + SHA-256 readback（必须由 GitHub Release workflow 执行）
 exact-head GitHub CI / CodeQL
 ```
 
@@ -89,7 +89,7 @@ exact-head GitHub CI / CodeQL
 
 缺少上述证据时，只能说明对应本地代码或离线测试通过，不能声称“11 来源真实租户全部通过”。GitHub 仓库、CI/CD、Release 与离线完整预览可以独立完成；当前 calendar/mail 必须明确保留为 `missing_scope`，Base/Sheets 必须保留为缺测试对象；direct OpenAPI 必须保留为未做真实验收。
 
-正式交付证据只能来自：PR exact-head checks、合并后的 main checks、指向同一 main SHA 的 `v1.0.1` Tag、成功的 Release workflow 和 GitHub Release 下载资产。本机 `dist/`、`bin/`、ZIP 或历史测试记录都不能替代这条链。
+正式交付证据只能来自：PR exact-head checks、合并后的 main checks、指向同一 main SHA 的 `v1.0.2` Tag、成功的 Release workflow 和 GitHub Release 下载资产。本机 `dist/`、`bin/`、ZIP 或历史测试记录都不能替代这条链。
 
 ## 后续真实环境补验
 

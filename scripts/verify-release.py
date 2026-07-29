@@ -118,6 +118,8 @@ def safe_name(name: str) -> str:
     path = PurePosixPath(normalized)
     if not normalized or path.is_absolute() or ".." in path.parts or "\\" in normalized:
         fail(f"unsafe archive entry: {name!r}")
+    if path.as_posix() != normalized:
+        fail(f"non-canonical archive entry: {name!r}")
     return normalized
 
 
@@ -219,6 +221,7 @@ def verify_runtime_archive(
     goos: str,
     goarch: str,
     suffix: str,
+    execute_runtime: bool,
 ) -> None:
     root = f"SuperFeishuSearch-{version}-{goos}-{goarch}"
     archive_path = directory / f"{root}{suffix}"
@@ -257,20 +260,32 @@ def verify_runtime_archive(
         raw = binary_entry.data
         if version.encode() not in raw or commit.encode() not in raw:
             fail(f"{archive_path.name} does not embed version={version} and commit={commit}")
-        if goos == "linux" and goarch == "amd64":
-            version_result = subprocess.run([str(binary), "version"], check=False, capture_output=True, text=True)
+        if execute_runtime and goos == "linux" and goarch == "amd64":
+            try:
+                version_result = subprocess.run(
+                    [str(binary), "version"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                fail(f"Linux amd64 version smoke could not complete: {error}")
             expected_version = f"sfs {version} commit={commit} "
             if version_result.returncode != 0 or expected_version not in version_result.stdout:
                 fail(f"Linux amd64 version smoke failed: {version_result.stdout.strip()} {version_result.stderr.strip()}")
             config_path = Path(temporary) / "config.demo.json"
             config_path.write_bytes(files["config.demo.json"].data or b"")
-            smoke = subprocess.run(
-                [str(binary), "--config", str(config_path), "--output", "json", "search", "A 项目 延期", "--sources", "docs,messages"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            try:
+                smoke = subprocess.run(
+                    [str(binary), "--config", str(config_path), "--output", "json", "search", "A 项目 延期", "--sources", "docs,messages"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                fail(f"Linux amd64 offline demo smoke could not complete: {error}")
             if smoke.returncode != 0:
                 fail(f"Linux amd64 offline demo smoke failed: {smoke.stderr.strip()}")
             payload = json.loads(smoke.stdout)
@@ -278,28 +293,118 @@ def verify_runtime_archive(
                 fail("Linux amd64 offline demo smoke returned no session or candidates")
 
 
-def content_map(entries: list[ArchiveEntry], root: str) -> dict[str, str]:
+def source_inventory(entries: list[ArchiveEntry], root: str) -> dict[str, tuple[str, int]]:
     files = files_under_root(entries, root)
-    return {name: hashlib.sha256(entry.data or b"").hexdigest() for name, entry in files.items()}
+    return {
+        name: (hashlib.sha256(entry.data or b"").hexdigest(), entry.mode & 0o777)
+        for name, entry in files.items()
+    }
 
 
-def verify_source_archives(directory: Path, version: str, repository: Path) -> None:
-    root = f"SuperFeishuSearch-{version}-source"
-    tar_map = content_map(read_archive(directory / f"{root}.tar.gz"), root)
-    zip_map = content_map(read_archive(directory / f"{root}.zip"), root)
-    if tar_map != zip_map:
-        fail("source ZIP and TAR.GZ contents differ")
-    tracked = subprocess.run(
-        ["git", "-C", str(repository), "ls-files", "-z"],
-        check=True,
+def repository_source_inventory(repository: Path) -> dict[str, tuple[str, int]]:
+    result = subprocess.run(
+        ["git", "-C", str(repository), "ls-tree", "-rz", "--full-tree", "HEAD"],
+        check=False,
         capture_output=True,
-    ).stdout.decode().split("\0")
-    tracked_set = {name for name in tracked if name}
-    if set(tar_map) != tracked_set:
-        missing = sorted(tracked_set - set(tar_map))
-        extra = sorted(set(tar_map) - tracked_set)
-        fail(f"source archive differs from tracked Git tree; missing={missing[:20]} extra={extra[:20]}")
-    for name in tar_map:
+    )
+    if result.returncode != 0:
+        fail(f"cannot enumerate tracked source tree: {result.stderr.decode(errors='replace').strip()}")
+    inventory: dict[str, tuple[str, int]] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_name = record.split(b"\t", 1)
+            mode, object_type, object_id = metadata.decode("ascii").split(" ", 2)
+            name = raw_name.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            fail(f"invalid git source tree record: {record!r}: {error}")
+        path = PurePosixPath(name)
+        if (
+            object_type != "blob"
+            or mode not in {"100644", "100755"}
+            or path.is_absolute()
+            or ".." in path.parts
+            or path.as_posix() != name
+        ):
+            fail(f"tracked source entry is not a canonical regular file: {name}")
+        blob = subprocess.run(
+            ["git", "-C", str(repository), "cat-file", "blob", object_id],
+            check=False,
+            capture_output=True,
+        )
+        if blob.returncode != 0:
+            fail(f"cannot read tracked source {name}: {blob.stderr.decode(errors='replace').strip()}")
+        inventory[name] = (hashlib.sha256(blob.stdout).hexdigest(), int(mode[-3:], 8))
+    if not inventory:
+        fail("tracked source tree is empty")
+    return inventory
+
+
+def materialize_source_archive(entries: list[ArchiveEntry], root: str, destination: Path) -> None:
+    if any(entry.is_link for entry in entries):
+        fail("links are not allowed while materializing a source archive")
+    files = files_under_root(entries, root)
+    try:
+        destination.mkdir(parents=True, exist_ok=False)
+        for name, entry in sorted(files.items()):
+            if entry.data is None:
+                fail(f"source archive entry has no data: {name}")
+            target = destination.joinpath(*PurePosixPath(name).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(entry.data)
+            target.chmod(entry.mode or 0o644)
+    except OSError as error:
+        fail(f"cannot safely materialize source archive: {error}")
+
+
+def verify_materialized_source(entries: list[ArchiveEntry], root: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="sfs-source-verify-") as temporary:
+        source = Path(temporary) / root
+        materialize_source_archive(entries, root, source)
+        try:
+            result = subprocess.run(
+                ["make", "verify"],
+                cwd=source,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=12 * 60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            fail(f"source archive make verify could not complete: {error}")
+        if result.returncode != 0:
+            output = (result.stdout + "\n" + result.stderr).strip()
+            fail(f"source archive make verify failed:\n{output[-12000:]}")
+
+
+def verify_source_archives(
+    directory: Path,
+    version: str,
+    repository: Path,
+    execute_source: bool,
+) -> None:
+    root = f"SuperFeishuSearch-{version}-source"
+    tar_entries = read_archive(directory / f"{root}.tar.gz")
+    zip_entries = read_archive(directory / f"{root}.zip")
+    tar_inventory = source_inventory(tar_entries, root)
+    zip_inventory = source_inventory(zip_entries, root)
+    if tar_inventory != zip_inventory:
+        fail("source ZIP and TAR.GZ contents or file modes differ")
+    tracked_inventory = repository_source_inventory(repository)
+    if tar_inventory != tracked_inventory:
+        missing = sorted(set(tracked_inventory) - set(tar_inventory))
+        extra = sorted(set(tar_inventory) - set(tracked_inventory))
+        modified = sorted(
+            name
+            for name in set(tar_inventory) & set(tracked_inventory)
+            if tar_inventory[name] != tracked_inventory[name]
+        )
+        fail(
+            "source archive differs from tracked Git tree; "
+            f"missing={missing[:20]} extra={extra[:20]} modified={modified[:20]}"
+        )
+    for name in tar_inventory:
         lowered = name.lower()
         base = PurePosixPath(name).name
         if any(lowered.startswith(prefix.lower()) for prefix in FORBIDDEN_SOURCE_PREFIXES):
@@ -314,8 +419,10 @@ def verify_source_archives(directory: Path, version: str, repository: Path) -> N
         "THIRD_PARTY_NOTICES.md",
         "config.demo.json",
     ):
-        if required not in tar_map:
+        if required not in tar_inventory:
             fail(f"source archives are missing {required}")
+    if execute_source:
+        verify_materialized_source(zip_entries, root)
 
 
 def main() -> int:
@@ -323,6 +430,12 @@ def main() -> int:
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument(
+        "--archive-execution",
+        choices=("required", "source", "skip"),
+        default="required",
+        help="execute Linux demo and source verify, source verify only, or passive archive verification only",
+    )
     args = parser.parse_args()
     directory, directory_entries = validate_release_directory(args.dir)
     version = args.version.removeprefix("v")
@@ -348,9 +461,18 @@ def main() -> int:
     repository = Path(__file__).resolve().parent.parent
     license_hashes = repository_license_hashes(repository)
     verify_checksums(directory, archive_names)
+    execute_runtime = args.archive_execution == "required"
+    execute_source = args.archive_execution != "skip"
     for target in TARGETS:
-        verify_runtime_archive(directory, version, commit, license_hashes, *target)
-    verify_source_archives(directory, version, repository)
+        verify_runtime_archive(
+            directory,
+            version,
+            commit,
+            license_hashes,
+            *target,
+            execute_runtime=execute_runtime,
+        )
+    verify_source_archives(directory, version, repository, execute_source)
     print(f"Verified 9 release files for SuperFeishuSearch {version} at {commit}")
     return 0
 

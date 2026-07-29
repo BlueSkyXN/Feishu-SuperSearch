@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SuperFeishuSearch API
-  version: 1.0.1
+  version: 1.0.2
   description: >-
     Deterministic federated retrieval API for Feishu objects. Search returns
     normalized candidates; Fetch materializes selected projections; Expand
