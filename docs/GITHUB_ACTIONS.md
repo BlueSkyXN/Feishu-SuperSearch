@@ -38,7 +38,7 @@ go test -race ./...
 整仓 coverage >= 65%
 核心包 coverage >= 75%
 文档链接、JSON、OpenAPI、Workflow、Shell/Python/Ruby 检查
-actionlint v1.7.12
+actionlint v1.7.7（保持与项目 Go 1.23 基线兼容）
 Mock CLI smoke
 ```
 

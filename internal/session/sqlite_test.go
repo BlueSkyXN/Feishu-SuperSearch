@@ -460,14 +460,73 @@ func TestSQLiteStoreRejectsSharedWritableDirectoryAndDatabaseSymlink(t *testing.
 }
 
 func TestSQLiteMemoryModeDetectionUsesExactQueryParameter(t *testing.T) {
+	for _, dsn := range []string{":memory:", "file::memory:", "file:memdb?mode=memory", "file:memdb?mode=MEMORY"} {
+		if !isMemorySQLitePath(dsn) {
+			t.Errorf("memory URI was not detected: %s", dsn)
+		}
+	}
+	for _, dsn := range []string{
+		"file:disk.sqlite?label=mode%3Dmemory",
+		"file:disk.sqlite?MODE=memory",
+		"file:disk.sqlite?xmode=memory",
+		"file:disk.sqlite?mode=memoryish",
+		"file:disk.sqlite?mode=rw&label=mode%3Dmemory",
+	} {
+		if isMemorySQLitePath(dsn) {
+			t.Errorf("disk URI was misclassified as memory: %s", dsn)
+		}
+	}
+
 	path := filepath.Join(t.TempDir(), "disk.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: path}).String() + "?label=mode%3Dmemory"
+	uriPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	dsn := (&url.URL{
+		Scheme:   "file",
+		Path:     uriPath,
+		RawQuery: url.Values{"label": {"mode=memory"}}.Encode(),
+	}).String()
 	if isMemorySQLitePath(dsn) {
 		t.Fatalf("disk URI was misclassified as memory: %s", dsn)
 	}
 	resolved, err := sqliteFilesystemPath(dsn)
-	if err != nil || resolved != path {
+	if err != nil || filepath.Clean(resolved) != filepath.Clean(path) {
 		t.Fatalf("resolved=%q err=%v want=%q", resolved, err, path)
+	}
+}
+
+func TestSQLiteWindowsFileURIPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows drive URI normalization")
+	}
+	for _, dsn := range []string{
+		"file:///C:/Temp/disk.sqlite",
+		"file:C:/Temp/disk.sqlite",
+		"file://localhost/C:/Temp/disk.sqlite",
+	} {
+		resolved, err := sqliteFilesystemPath(dsn)
+		if err != nil || resolved != `C:\Temp\disk.sqlite` {
+			t.Errorf("dsn=%q resolved=%q err=%v", dsn, resolved, err)
+		}
+	}
+	if _, err := sqliteFilesystemPath(`file://C:%5CTemp%5Cdisk.sqlite`); err == nil {
+		t.Fatal("malformed drive-in-authority URI was accepted")
+	}
+}
+
+func TestSQLitePOSIXFileURIPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path semantics")
+	}
+	for _, dsn := range []string{"file:///tmp/disk.sqlite", "file://localhost/tmp/disk.sqlite"} {
+		resolved, err := sqliteFilesystemPath(dsn)
+		if err != nil || resolved != "/tmp/disk.sqlite" {
+			t.Errorf("dsn=%q resolved=%q err=%v", dsn, resolved, err)
+		}
+	}
+	if _, err := sqliteFilesystemPath("file://remote-host/tmp/disk.sqlite"); err == nil {
+		t.Fatal("remote file authority was accepted")
 	}
 }
 

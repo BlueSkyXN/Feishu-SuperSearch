@@ -45,7 +45,8 @@ api-check:
 
 workflow-check:
 	ruby scripts/check-workflows.rb
-	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -config-file .github/actionlint.yaml .github/workflows/*.yml
+	# v1.7.8+ requires Go 1.24; v1.7.7 is the latest release compatible with go.mod's Go 1.23 baseline.
+	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -config-file .github/actionlint.yaml .github/workflows/*.yml
 
 license-check:
 	python3 scripts/check-third-party-licenses.py

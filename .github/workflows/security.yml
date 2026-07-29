@@ -95,18 +95,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: go
           build-mode: manual
           queries: security-and-quality
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
 
       - name: Build analyzed code
         run: CGO_ENABLED=0 go build ./...

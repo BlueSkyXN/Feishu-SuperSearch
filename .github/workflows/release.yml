@@ -59,9 +59,11 @@ jobs:
               exit 1
             }
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=SuperFeishuSearch-${version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "artifact_name=SuperFeishuSearch-${version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_OUTPUT"
           echo "Packaging version=$version commit=$commit"
 
       - name: Set up Go

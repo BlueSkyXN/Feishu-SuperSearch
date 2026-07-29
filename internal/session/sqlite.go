@@ -165,7 +165,14 @@ func sqliteFilesystemPath(path string) (string, error) {
 	if value == "" {
 		return "", errors.New("SQLite file URI has no filesystem path")
 	}
-	return value, nil
+	if filepath.Separator == '\\' && len(value) >= 3 && value[0] == '/' && isASCIILetter(value[1]) && value[2] == ':' {
+		value = value[1:]
+	}
+	return filepath.FromSlash(value), nil
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }
 
 func (s *SQLiteStore) initialize(ctx context.Context) error {
