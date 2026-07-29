@@ -1,0 +1,718 @@
+openapi: 3.1.0
+info:
+  title: SuperFeishuSearch API
+  version: 1.0.1
+  description: >-
+    Deterministic federated retrieval API for Feishu objects. Search returns
+    normalized candidates; Fetch materializes selected projections; Expand
+    discovers supported relations; Research builds deterministic evidence;
+    optional Ask produces an evidence-grounded answer.
+servers:
+  - url: http://127.0.0.1:3765
+paths:
+  /v1/health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Service status
+          content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}
+  /v1/capabilities:
+    get:
+      operationId: capabilities
+      parameters:
+        - in: query
+          name: probe
+          schema: {type: boolean, default: false}
+      responses:
+        '200':
+          description: Provider capabilities
+          content: {application/json: {schema: {$ref: '#/components/schemas/CapabilitySnapshot'}}}
+  /v1/search:
+    post:
+      operationId: search
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/SearchRequest'}}}
+      responses:
+        '200':
+          description: Federated search snapshot; individual sources may be partial
+          content: {application/json: {schema: {$ref: '#/components/schemas/SearchSnapshot'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/search/continue:
+    post:
+      operationId: continueSearch
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ContinueRequest'}}}
+      responses:
+        '200':
+          description: Updated search snapshot
+          content: {application/json: {schema: {$ref: '#/components/schemas/SearchSnapshot'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/query:
+    post:
+      operationId: query
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/QueryRequest'}}}
+      responses:
+        '200':
+          description: Structured or in-object query results
+          content: {application/json: {schema: {$ref: '#/components/schemas/QuerySnapshot'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/fetch:
+    post:
+      operationId: fetch
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FetchBatchRequest'}}}
+      responses:
+        '200':
+          description: Materialized artifacts; per-item failures are represented in items
+          content: {application/json: {schema: {$ref: '#/components/schemas/ArtifactBatch'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/expand:
+    post:
+      operationId: expand
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExpandRequest'}}}
+      responses:
+        '200':
+          description: Discovered object relations
+          content: {application/json: {schema: {$ref: '#/components/schemas/RelationBatch'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/resolve:
+    post:
+      operationId: resolve
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResolveRequest'}}}
+      responses:
+        '200':
+          description: Resolved object references
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refs]
+                properties:
+                  refs: {type: array, items: {$ref: '#/components/schemas/ObjectRef'}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/plans:execute:
+    post:
+      operationId: executePlan
+      description: >-
+        Executes retrieval-plan/v1. Use Accept: text/event-stream for retrieval
+        events followed by a result event; otherwise returns result and events as JSON.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RetrievalPlan'}}}
+      responses:
+        '200':
+          description: Plan result or SSE stream
+          content:
+            application/json: {schema: {type: object}}
+            text/event-stream: {schema: {type: string}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/research:
+    post:
+      operationId: research
+      description: >-
+        Bounded Search → Fetch → Evidence workflow using the configured planner.
+        Use Accept: text/event-stream for progress and retrieval events followed
+        by exactly one result or error terminal event.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResearchRequest'}}}
+      responses:
+        '200':
+          description: Research result or negotiated SSE stream
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/ResearchResult'}}
+            text/event-stream: {schema: {type: string}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/ask:
+    post:
+      operationId: ask
+      description: >-
+        Runs bounded retrieval and evidence extraction, then asks the optional
+        Answerer to produce claims whose citation IDs must exist in the Evidence Pack.
+        Use Accept: text/event-stream for progress and retrieval events followed
+        by exactly one result or error terminal event.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AskRequest'}}}
+      responses:
+        '200':
+          description: Evidence-grounded answer or negotiated SSE stream
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/AskResult'}}
+            text/event-stream: {schema: {type: string}}
+        '501':
+          description: AI answer is disabled
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/sessions:
+    get:
+      operationId: listSessions
+      parameters:
+        - in: query
+          name: profile
+          schema: {type: string}
+          description: Identity profile used to derive the session scope
+        - in: query
+          name: mode
+          schema: {type: string, enum: [auto, user, bot], default: auto}
+          description: Identity mode used to derive the session scope
+      responses:
+        '200':
+          description: Non-expired sessions
+          content: {application/json: {schema: {type: object}}}
+  /v1/sessions/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: query
+        name: profile
+        schema: {type: string}
+        description: Identity profile used to derive the session scope
+      - in: query
+        name: mode
+        schema: {type: string, enum: [auto, user, bot], default: auto}
+        description: Identity mode used to derive the session scope
+    get:
+      operationId: getSession
+      responses:
+        '200':
+          description: Full retrieval session
+          content: {application/json: {schema: {$ref: '#/components/schemas/SessionSnapshot'}}}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteSession
+      responses:
+        '204': {description: Deleted}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    Error:
+      description: Structured error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ok, error]
+            properties:
+              ok: {const: false}
+              error: {$ref: '#/components/schemas/ErrorDetail'}
+  schemas:
+    Health:
+      type: object
+      required: [ok, backend, providers, storage, time, ai]
+      additionalProperties: false
+      properties:
+        ok: {const: true}
+        backend: {type: string}
+        providers: {type: integer, minimum: 0}
+        storage: {type: string, enum: [sqlite, file, memory]}
+        time: {type: string, format: date-time}
+        ai:
+          type: object
+          required: [enabled, planner, rerank, answer]
+          additionalProperties: false
+          properties:
+            enabled: {type: boolean}
+            planner: {type: boolean}
+            rerank: {type: boolean}
+            answer: {type: boolean}
+    ErrorEnvelope:
+      type: object
+      required: [ok, error]
+      additionalProperties: false
+      properties:
+        ok: {const: false}
+        error: {$ref: '#/components/schemas/ErrorDetail'}
+    SourceID:
+      type: string
+      enum: [docs, messages, chats, people, minutes, meetings, calendar, tasks, mail, base, sheets]
+    ObjectKind:
+      type: string
+      enum: [unknown, document, message, chat, person, minute, meeting, event, task, tasklist, mail, base, base_table, record, sheet, cell, attachment]
+    Projection:
+      type: string
+      enum: [head, snippet, summary, structure, content, context, relations, attachments]
+    ProjectionSet:
+      type: array
+      uniqueItems: true
+      items: {$ref: '#/components/schemas/Projection'}
+    Identity:
+      type: object
+      properties:
+        profile: {type: string}
+        mode: {type: string, enum: [auto, user, bot], default: auto}
+        scope_key: {type: string, readOnly: true}
+    ObjectRef:
+      type: object
+      properties:
+        platform: {type: string, default: feishu}
+        scope_key: {type: string}
+        kind: {$ref: '#/components/schemas/ObjectKind'}
+        native_id: {type: string}
+        canonical_id: {type: string}
+        provider_id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        url: {type: string, format: uri}
+      anyOf:
+        - required: [canonical_id]
+        - required: [native_id]
+    Actor:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        email: {type: string}
+        avatar: {type: string}
+    Candidate:
+      type: object
+      required: [ref, source, kind, title, native_rank, fused_score, projection, available_projection]
+      properties:
+        ref: {$ref: '#/components/schemas/ObjectRef'}
+        source: {$ref: '#/components/schemas/SourceID'}
+        kind: {$ref: '#/components/schemas/ObjectKind'}
+        title: {type: string}
+        snippet: {type: string}
+        url: {type: string}
+        timestamp: {type: string, format: date-time}
+        actors: {type: array, items: {$ref: '#/components/schemas/Actor'}}
+        container: {type: object}
+        native_rank: {type: integer, minimum: 1}
+        native_score: {type: number}
+        fused_score: {type: number}
+        projection: {$ref: '#/components/schemas/ProjectionSet'}
+        available_projection: {$ref: '#/components/schemas/ProjectionSet'}
+        relation_hints: {type: array, items: {type: object}}
+        discovered_by: {type: array, items: {type: object}}
+        provenance: {type: object}
+    SearchFilters:
+      type: object
+      properties:
+        after: {type: string, format: date-time}
+        before: {type: string, format: date-time}
+        sender_ids: {type: array, items: {type: string}}
+        person_ids: {type: array, items: {type: string}}
+        chat_ids: {type: array, items: {type: string}}
+        doc_types: {type: array, items: {type: string}}
+        folder_tokens: {type: array, items: {type: string}}
+        space_ids: {type: array, items: {type: string}}
+        mine: {type: boolean}
+        completed: {type: boolean}
+        only_title: {type: boolean}
+        extra: {type: object, additionalProperties: true}
+    SearchBudget:
+      type: object
+      properties:
+        deadline_ms: {type: integer, minimum: 1, default: 8000}
+        max_calls: {type: integer, minimum: 1, default: 24}
+        max_pages_per_source: {type: integer, minimum: 1, default: 2}
+        max_fetches: {type: integer, minimum: 1, default: 12}
+        max_expanded_nodes: {type: integer, minimum: 1, default: 20}
+        max_bytes: {type: integer, minimum: 1, default: 33554432}
+    SearchStrategy:
+      type: object
+      properties:
+        profile: {type: string, enum: [fast, balanced, deep], default: balanced}
+        fusion: {type: string, enum: [weighted_rrf], default: weighted_rrf}
+        pagination: {type: string, enum: [adaptive, fixed, none], default: adaptive}
+        source_quota: {type: boolean, default: true}
+        disable_source_quota: {type: boolean, default: false}
+        weights: {type: object, additionalProperties: {type: number}}
+        quotas: {type: object, additionalProperties: {type: integer}}
+        k0: {type: number, default: 60}
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: {type: string, minLength: 1}
+        source_queries:
+          type: object
+          additionalProperties: {type: string}
+        sources: {type: array, items: {$ref: '#/components/schemas/SourceID'}}
+        filters: {$ref: '#/components/schemas/SearchFilters'}
+        identity: {$ref: '#/components/schemas/Identity'}
+        limit: {type: integer, minimum: 1, default: 40}
+        limit_per_source: {type: integer, minimum: 1, default: 8}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+        strategy: {$ref: '#/components/schemas/SearchStrategy'}
+        session_id: {type: string}
+    ContinueRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id: {type: string}
+        sources: {type: array, items: {$ref: '#/components/schemas/SourceID'}}
+        max_additional_pages: {type: integer, minimum: 1, maximum: 5, default: 1}
+        identity: {$ref: '#/components/schemas/Identity'}
+    QueryRequest:
+      type: object
+      required: [source]
+      properties:
+        source: {$ref: '#/components/schemas/SourceID'}
+        container: {$ref: '#/components/schemas/ObjectRef'}
+        filter: {type: object, additionalProperties: true}
+        sort: {type: array, items: {type: object, required: [field], properties: {field: {type: string}, order: {type: string, enum: [asc, desc]}}}}
+        limit: {type: integer, minimum: 1, default: 50}
+        cursor: {type: string}
+        identity: {$ref: '#/components/schemas/Identity'}
+        session_id: {type: string}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+    FetchRequest:
+      type: object
+      required: [ref, projection]
+      properties:
+        ref: {$ref: '#/components/schemas/ObjectRef'}
+        projection: {$ref: '#/components/schemas/ProjectionSet'}
+    FetchBatchRequest:
+      type: object
+      required: [items]
+      properties:
+        session_id: {type: string}
+        identity: {$ref: '#/components/schemas/Identity'}
+        items: {type: array, minItems: 1, items: {$ref: '#/components/schemas/FetchRequest'}}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+    ExpandRequest:
+      type: object
+      required: [ref]
+      properties:
+        session_id: {type: string}
+        identity: {$ref: '#/components/schemas/Identity'}
+        ref: {$ref: '#/components/schemas/ObjectRef'}
+        relations: {type: array, items: {type: string}}
+        max_depth: {type: integer, minimum: 1, maximum: 2, default: 1}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+    ResolveRequest:
+      type: object
+      required: [text]
+      properties:
+        source: {$ref: '#/components/schemas/SourceID'}
+        text: {type: string, minLength: 1}
+        kind: {$ref: '#/components/schemas/ObjectKind'}
+        identity: {$ref: '#/components/schemas/Identity'}
+        limit: {type: integer, minimum: 1, default: 10}
+    ResearchRequest:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query: {type: string, minLength: 1}
+        sources: {type: array, items: {$ref: '#/components/schemas/SourceID'}}
+        identity: {$ref: '#/components/schemas/Identity'}
+        filters: {$ref: '#/components/schemas/SearchFilters'}
+        limit: {type: integer, minimum: 1, default: 40}
+        deep: {type: boolean, default: true}
+        fetch_top_k: {type: integer, minimum: 1, maximum: 20, default: 8}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+    AskRequest:
+      allOf:
+        - {$ref: '#/components/schemas/ResearchRequest'}
+    SourceSpan:
+      type: object
+      additionalProperties: false
+      properties:
+        chunk_id: {type: string}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 0}
+    Evidence:
+      type: object
+      required: [id, kind, claim_type, text, quote, source_ref, projection, source_span, confidence]
+      additionalProperties: false
+      properties:
+        id: {type: string, pattern: '^ev_[0-9a-f]{20}$'}
+        kind: {type: string}
+        claim_type: {type: string, enum: [fact, summary, decision, action_item]}
+        text: {type: string}
+        quote: {type: string}
+        source_ref: {$ref: '#/components/schemas/ObjectRef'}
+        projection: {$ref: '#/components/schemas/ProjectionSet'}
+        source_span: {$ref: '#/components/schemas/SourceSpan'}
+        timestamp: {type: string, format: date-time}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        url: {type: string, format: uri}
+    EvidencePack:
+      type: object
+      required: [query, session_id, evidence]
+      properties:
+        query: {type: string}
+        session_id: {type: string}
+        evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}
+    CandidatePack:
+      type: object
+      required: [query, session_id, candidates, sources]
+      properties:
+        query: {type: string}
+        session_id: {type: string}
+        candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        sources: {type: array, items: {$ref: '#/components/schemas/SourceRun'}}
+    ArtifactPack:
+      type: object
+      required: [session_id, artifacts]
+      properties:
+        session_id: {type: string}
+        artifacts: {type: array, items: {$ref: '#/components/schemas/Artifact'}}
+        relations: {type: array, items: {$ref: '#/components/schemas/Relation'}}
+    ResearchResult:
+      type: object
+      required: [planner, plan, plan_result, candidate_pack, artifact_pack, evidence_pack, summary]
+      properties:
+        planner: {type: string}
+        plan: {$ref: '#/components/schemas/RetrievalPlan'}
+        plan_result: {type: object}
+        candidate_pack: {$ref: '#/components/schemas/CandidatePack'}
+        artifact_pack: {$ref: '#/components/schemas/ArtifactPack'}
+        evidence_pack: {$ref: '#/components/schemas/EvidencePack'}
+        summary: {type: string}
+        events: {type: array, items: {type: object}}
+        warnings: {type: array, items: {type: string}}
+    WorkflowProgressEvent:
+      type: object
+      required: [type, phase, time]
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [progress, retrieval]}
+        phase:
+          type: string
+          enum: [capabilities, planning, retrieving, reranking, evidence, research_complete, answering, complete]
+        message: {type: string}
+        time: {type: string, format: date-time}
+        retrieval: {type: object, additionalProperties: true}
+    Claim:
+      type: object
+      required: [text, evidence_ids]
+      additionalProperties: false
+      properties:
+        text: {type: string, minLength: 1}
+        evidence_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+    Citation:
+      type: object
+      required: [id, evidence_id, source_ref, quote]
+      additionalProperties: false
+      properties:
+        id: {type: string, description: Must equal an Evidence.id in the returned Evidence Pack}
+        evidence_id: {type: string}
+        source_ref: {$ref: '#/components/schemas/ObjectRef'}
+        quote: {type: string}
+        url: {type: string, format: uri}
+    Answer:
+      type: object
+      required: [text, partial]
+      properties:
+        text: {type: string}
+        claims: {type: array, items: {$ref: '#/components/schemas/Claim'}}
+        citations: {type: array, items: {$ref: '#/components/schemas/Citation'}}
+        warnings: {type: array, items: {type: string}}
+        partial: {type: boolean}
+        refused: {type: boolean, description: True when available evidence is insufficient for an answer}
+    AskResult:
+      type: object
+      required: [research, answer, answerer, partial]
+      properties:
+        research: {$ref: '#/components/schemas/ResearchResult'}
+        answer: {$ref: '#/components/schemas/Answer'}
+        answerer: {type: string}
+        partial: {type: boolean}
+        warnings: {type: array, items: {type: string}}
+    ErrorDetail:
+      type: object
+      required: [type, message]
+      properties:
+        type: {type: string}
+        subtype: {type: string}
+        code: {type: integer}
+        message: {type: string}
+        hint: {type: string}
+        retryable: {type: boolean}
+        provider_id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        details: {type: object, additionalProperties: true}
+    SourceRun:
+      type: object
+      required: [source, status, pages, hit_count, elapsed_ms]
+      properties:
+        provider_id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        status: {type: string, enum: [ok, partial, empty, unavailable, missing_scope, failed, deadline_exceeded, budget_exhausted]}
+        pages: {type: integer}
+        hit_count: {type: integer}
+        elapsed_ms: {type: integer}
+        error: {$ref: '#/components/schemas/ErrorDetail'}
+    Continuation:
+      type: object
+      required: [provider_id, source, cursor, has_more, pages_fetched]
+      properties:
+        provider_id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        cursor: {type: string}
+        has_more: {type: boolean}
+        pages_fetched: {type: integer}
+    SearchSnapshot:
+      type: object
+      required: [session_id, query, candidates, sources, partial, budget, stats]
+      properties:
+        session_id: {type: string}
+        query: {type: string}
+        candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        sources: {type: array, items: {$ref: '#/components/schemas/SourceRun'}}
+        continuations: {type: array, items: {$ref: '#/components/schemas/Continuation'}}
+        partial: {type: boolean}
+        budget: {type: object}
+        stats: {type: object}
+    QuerySnapshot:
+      type: object
+      properties:
+        session_id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        continuation: {$ref: '#/components/schemas/Continuation'}
+        source_run: {$ref: '#/components/schemas/SourceRun'}
+        budget: {type: object}
+    ContentChunk:
+      type: object
+      required: [text]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        text: {type: string}
+        start: {type: integer}
+        end: {type: integer}
+        timestamp: {type: string, format: date-time}
+        metadata: {type: object, additionalProperties: true}
+    Artifact:
+      type: object
+      required: [ref, projection, provenance]
+      properties:
+        ref: {$ref: '#/components/schemas/ObjectRef'}
+        projection: {$ref: '#/components/schemas/ProjectionSet'}
+        metadata: {type: object, additionalProperties: true}
+        chunks: {type: array, items: {$ref: '#/components/schemas/ContentChunk'}}
+        summary: {type: object}
+        relations: {type: array, items: {$ref: '#/components/schemas/Relation'}}
+        attachments: {type: array, items: {type: object}}
+        version: {type: string}
+        provenance: {type: object}
+    ArtifactBatch:
+      type: object
+      properties:
+        session_id: {type: string}
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              ref: {$ref: '#/components/schemas/ObjectRef'}
+              artifact: {$ref: '#/components/schemas/Artifact'}
+              error: {$ref: '#/components/schemas/ErrorDetail'}
+              cached: {type: boolean}
+              shared: {type: boolean}
+        partial: {type: boolean}
+        budget: {type: object}
+    Relation:
+      type: object
+      required: [from, type, to, confidence]
+      properties:
+        from: {$ref: '#/components/schemas/ObjectRef'}
+        type: {type: string}
+        to: {$ref: '#/components/schemas/ObjectRef'}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        provenance: {type: object}
+    RelationBatch:
+      type: object
+      properties:
+        session_id: {type: string}
+        relations: {type: array, items: {$ref: '#/components/schemas/Relation'}}
+        partial: {type: boolean}
+        error: {$ref: '#/components/schemas/ErrorDetail'}
+        budget: {type: object}
+    ProviderDescriptor:
+      type: object
+      properties:
+        id: {type: string}
+        source: {$ref: '#/components/schemas/SourceID'}
+        object_kinds: {type: array, items: {$ref: '#/components/schemas/ObjectKind'}}
+        operations: {type: object, additionalProperties: {type: boolean}}
+        required_identity: {type: array, items: {type: string}}
+        required_scopes: {type: array, items: {type: string}}
+        returned_projection: {$ref: '#/components/schemas/ProjectionSet'}
+        fetchable_projection: {$ref: '#/components/schemas/ProjectionSet'}
+        search_limits: {type: object}
+        batch_limits: {type: object}
+        supports_pagination: {type: boolean}
+        supports_streaming: {type: boolean}
+        backend: {type: string}
+        version: {type: string}
+    CapabilitySnapshot:
+      type: object
+      properties:
+        generated_at: {type: string, format: date-time}
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              descriptor: {$ref: '#/components/schemas/ProviderDescriptor'}
+              status: {type: string}
+              version: {type: string}
+              error: {$ref: '#/components/schemas/ErrorDetail'}
+              operations:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    status: {type: string}
+                    version: {type: string}
+                    error: {$ref: '#/components/schemas/ErrorDetail'}
+    PlanNode:
+      type: object
+      required: [id, op]
+      properties:
+        id: {type: string, minLength: 1}
+        op: {type: string, enum: [resolve, search, query, fetch, expand, merge, dedup, rank, limit, project, map_fetch]}
+        depends_on: {type: array, items: {type: string}}
+        request: {type: object, additionalProperties: true}
+        priority: {type: number}
+        optional: {type: boolean}
+        max_items: {type: integer, minimum: 1}
+        retry:
+          type: object
+          properties:
+            max_attempts: {type: integer, minimum: 1, maximum: 10}
+            backoff_ms: {type: integer, minimum: 0}
+            max_backoff_ms: {type: integer, minimum: 0}
+          additionalProperties: false
+    RetrievalPlan:
+      type: object
+      required: [version, nodes]
+      properties:
+        version: {const: retrieval-plan/v1}
+        session: {type: object, properties: {id: {type: string}, reuse: {type: boolean}}}
+        identity: {$ref: '#/components/schemas/Identity'}
+        budget: {$ref: '#/components/schemas/SearchBudget'}
+        nodes: {type: array, minItems: 1, maxItems: 200, items: {$ref: '#/components/schemas/PlanNode'}}
+        output: {type: array, items: {type: string}}
+        metadata: {type: object, additionalProperties: true}
+    SessionSnapshot:
+      type: object
+      properties:
+        id: {type: string}
+        scope_key: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        request: {$ref: '#/components/schemas/SearchRequest'}
+        candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        artifacts: {type: array, items: {$ref: '#/components/schemas/Artifact'}}
+        relations: {type: array, items: {$ref: '#/components/schemas/Relation'}}
+        frontiers: {type: object, additionalProperties: {$ref: '#/components/schemas/Continuation'}}
+        source_runs: {type: array, items: {$ref: '#/components/schemas/SourceRun'}}
+        budget: {type: object}
+        events: {type: array, items: {type: object}}

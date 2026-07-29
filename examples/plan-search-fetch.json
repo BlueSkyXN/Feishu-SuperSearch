@@ -1,0 +1,89 @@
+{
+  "version": "retrieval-plan/v1",
+  "identity": {
+    "mode": "user"
+  },
+  "budget": {
+    "deadline_ms": 15000,
+    "max_calls": 24,
+    "max_pages_per_source": 2,
+    "max_fetches": 8,
+    "max_expanded_nodes": 8,
+    "max_bytes": 16777216
+  },
+  "nodes": [
+    {
+      "id": "search",
+      "op": "search",
+      "priority": 100,
+      "retry": {
+        "max_attempts": 2,
+        "backoff_ms": 200,
+        "max_backoff_ms": 1000
+      },
+      "request": {
+        "query": "A 项目 延期",
+        "source_queries": {
+          "docs": "A 项目 延期",
+          "messages": "A 项目 延期",
+          "minutes": "A 项目"
+        },
+        "sources": [
+          "docs",
+          "messages",
+          "minutes",
+          "meetings",
+          "tasks"
+        ],
+        "limit": 30,
+        "limit_per_source": 8,
+        "strategy": {
+          "profile": "balanced",
+          "fusion": "weighted_rrf",
+          "pagination": "adaptive",
+          "source_quota": true,
+          "k0": 60
+        }
+      }
+    },
+    {
+      "id": "fetch_top",
+      "op": "map_fetch",
+      "depends_on": [
+        "search"
+      ],
+      "priority": 50,
+      "max_items": 6,
+      "request": {
+        "top_k": 6,
+        "max_items": 6,
+        "projection_by_kind": {
+          "document": [
+            "structure",
+            "content"
+          ],
+          "message": [
+            "content",
+            "context",
+            "relations"
+          ],
+          "minute": [
+            "summary",
+            "relations"
+          ],
+          "meeting": [
+            "content",
+            "relations"
+          ],
+          "task": [
+            "content"
+          ]
+        }
+      }
+    }
+  ],
+  "output": [
+    "search",
+    "fetch_top"
+  ]
+}

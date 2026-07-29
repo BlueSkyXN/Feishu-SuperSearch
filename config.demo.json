@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "backend": "mock",
+  "storage": {
+    "type": "memory",
+    "ttl": "2h"
+  },
+  "ai": {
+    "enabled": true,
+    "provider": "demo",
+    "answer": {
+      "enabled": true
+    }
+  }
+}

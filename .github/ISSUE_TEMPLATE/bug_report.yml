@@ -1,0 +1,58 @@
+name: Bug 报告
+description: 报告可复现的程序错误
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不要在公开 Issue 中粘贴 Access Token、OAuth profile 内容、真实消息或邮件正文。安全问题请使用 Security Advisory。
+  - type: input
+    id: version
+    attributes:
+      label: SuperFeishuSearch 版本
+      placeholder: sfs 1.0.1 commit=...
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - mock
+        - larkcli
+        - openapi
+        - hybrid
+        - replay
+        - external provider
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现步骤
+      description: 提供脱敏命令、配置片段和输入。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      placeholder: OS、Go、lark-cli、身份模式、相关 scope
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      render: shell

@@ -1,0 +1,41 @@
+name: 功能建议
+description: 建议新的检索能力、Provider 或接口
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景
+      description: 当前流程中无法完成或成本过高的部分是什么？
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: 主要层次
+      options:
+        - Retrieval Kernel
+        - Provider / Adapter
+        - Planner
+        - CLI / HTTP / MCP / Web
+        - Synthesis
+        - Documentation / CI
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已考虑的替代方案
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: 契约与兼容性影响
+      description: 是否涉及新的 scope、身份、Projection、Schema 或配置？

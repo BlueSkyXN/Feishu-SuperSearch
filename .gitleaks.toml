@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Verified SHA-256 rows in the runtime license manifest"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^LICENSES/runtime-dependencies\.json$''']
+regexes = ['''^\s+"LICENSES/[^"\r\n]+": "[0-9a-f]{64}",?\s*$''']

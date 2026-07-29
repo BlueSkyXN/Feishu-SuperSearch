@@ -1,0 +1,36 @@
+{
+  "name": "super-feishu-search-web",
+  "private": true,
+  "version": "1.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest",
+    "build:web": "vite build",
+    "sync:static": "node scripts/sync-static.mjs",
+    "build": "npm run typecheck && npm run build:web && npm run sync:static",
+    "check:static": "node scripts/check-static.mjs",
+    "verify": "npm run test && npm run build && npm run check:static"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "18.3.20",
+    "@types/react-dom": "18.3.6",
+    "@vitejs/plugin-react": "4.4.1",
+    "axe-core": "4.10.3",
+    "jsdom": "26.1.0",
+    "typescript": "5.8.3",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
+  }
+}
