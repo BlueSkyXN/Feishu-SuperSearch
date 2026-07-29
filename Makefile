@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-VERSION ?= 1.0.2
+VERSION ?= 1.0.3
 ARCHIVE_EXECUTION ?= required
 COMMIT ?= $(shell if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && test -z "$$(git status --porcelain --untracked-files=normal)"; then git rev-parse HEAD; else echo local-uncommitted; fi)
 BUILT_AT ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)

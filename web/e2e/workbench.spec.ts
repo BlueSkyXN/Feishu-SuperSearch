@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import axe from "axe-core";
 
 test("桌面端完成搜索、预览、Doctor 与 Session 恢复", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/");
   await expect(page.getByText("仅限本机回环访问")).toBeVisible();
   await expect(page.getByText(/mock · memory/)).toBeVisible();
@@ -24,10 +24,19 @@ test("桌面端完成搜索、预览、Doctor 与 Session 恢复", async ({ page
   await page.getByRole("button", { name: "运行 Doctor" }).click();
   await expect(page.getByRole("button", { name: "运行 Doctor" })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "Session 历史" })).toBeVisible();
+  await page.getByText("查看 8 个 Provider", { exact: true }).click();
+  const sidebarMetrics = await page.locator(".sidebar").evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(sidebarMetrics.overflowY).toBe("auto");
+  expect(sidebarMetrics.scrollHeight).toBeGreaterThan(sidebarMetrics.clientHeight);
   await input.fill("临时未提交内容");
   await page.getByRole("button", { name: /A 项目 延期/ }).first().click();
   await expect(input).toHaveValue("A 项目 延期");
   await expect(page.getByText("A 项目上线计划与风险")).toBeVisible();
+  await page.getByText("查看 8 个 Provider", { exact: true }).click();
 
   await page.addScriptTag({ content: axe.source });
   const violations = await page.evaluate(async () => (window as typeof window & { axe: { run: () => Promise<{ violations: Array<{ id: string; help: string; nodes: Array<{ target: string[]; failureSummary: string }> }> }> } }).axe.run());
@@ -68,6 +77,19 @@ test("390x844 键盘流程无横向溢出", async ({ page }) => {
   await input.fill("A 项目 延期");
   await input.press("Control+Enter");
   await expect(page.getByText("A 项目上线计划与风险")).toBeVisible();
+  const mobileSidebarStyles = await page.locator(".sidebar").evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    position: getComputedStyle(element).position,
+  }));
+  expect(mobileSidebarStyles).toEqual({
+    maxHeight: "none",
+    overflowY: "visible",
+    position: "static",
+  });
+  await input.fill("临时未提交内容");
+  await page.getByRole("button", { name: /A 项目 延期/ }).first().click();
+  await expect(input).toHaveValue("A 项目 延期");
   const layout = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
     const overflow = Array.from(document.querySelectorAll<HTMLElement>("body *")).filter((element) => {

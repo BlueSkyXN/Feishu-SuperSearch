@@ -194,8 +194,8 @@ Security / CodeQL
 ```bash
 gh pr checks <PR_NUMBER>
 gh run list --branch main --limit 20
-gh release view v1.0.2 --json tagName,targetCommitish,url,assets
-gh release download v1.0.2 --pattern SHA256SUMS
+gh release view v1.0.3 --json tagName,targetCommitish,url,assets
+gh release download v1.0.3 --pattern SHA256SUMS
 ```
 
 需要同时记录：PR head SHA、merge SHA、main workflow SHA、Tag SHA、Release URL、9 个资产名和校验和。只看到绿色 badge 或 Release 页面标题不够。

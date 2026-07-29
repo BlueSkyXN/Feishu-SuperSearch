@@ -76,26 +76,26 @@ Entrypoints
 
 | 系统 | 资产 |
 |---|---|
-| macOS Apple Silicon | `SuperFeishuSearch-1.0.2-darwin-arm64.tar.gz` |
-| macOS Intel | `SuperFeishuSearch-1.0.2-darwin-amd64.tar.gz` |
-| Linux x86-64 | `SuperFeishuSearch-1.0.2-linux-amd64.tar.gz` |
-| Linux ARM64 | `SuperFeishuSearch-1.0.2-linux-arm64.tar.gz` |
-| Windows x86-64 | `SuperFeishuSearch-1.0.2-windows-amd64.zip` |
-| Windows ARM64 | `SuperFeishuSearch-1.0.2-windows-arm64.zip` |
+| macOS Apple Silicon | `SuperFeishuSearch-1.0.3-darwin-arm64.tar.gz` |
+| macOS Intel | `SuperFeishuSearch-1.0.3-darwin-amd64.tar.gz` |
+| Linux x86-64 | `SuperFeishuSearch-1.0.3-linux-amd64.tar.gz` |
+| Linux ARM64 | `SuperFeishuSearch-1.0.3-linux-arm64.tar.gz` |
+| Windows x86-64 | `SuperFeishuSearch-1.0.3-windows-amd64.zip` |
+| Windows ARM64 | `SuperFeishuSearch-1.0.3-windows-arm64.zip` |
 
 macOS/Linux：
 
 ```bash
-tar -xzf SuperFeishuSearch-1.0.2-<os>-<arch>.tar.gz
-cd SuperFeishuSearch-1.0.2-<os>-<arch>
+tar -xzf SuperFeishuSearch-1.0.3-<os>-<arch>.tar.gz
+cd SuperFeishuSearch-1.0.3-<os>-<arch>
 ./sfs version
 ```
 
 Windows PowerShell：
 
 ```powershell
-Expand-Archive .\SuperFeishuSearch-1.0.2-windows-amd64.zip
-cd .\SuperFeishuSearch-1.0.2-windows-amd64
+Expand-Archive .\SuperFeishuSearch-1.0.3-windows-amd64.zip
+cd .\SuperFeishuSearch-1.0.3-windows-amd64
 .\sfs.exe version
 ```
 
@@ -707,7 +707,7 @@ SFS_AI_MODEL
 
 - `CI`：PR 与 `main` exact-head 的格式、Vet、单元/竞态测试、coverage、文档、Mock、Web、Playwright、平台原生构建和 Docker；
 - `Security`：每个 PR、`main`、merge queue 和每周定时的 NPM audit、Govulncheck 与 CodeQL；
-- `Release`：只接受属于 `main` 的稳定 `vX.Y.Z` Tag，自动构建六平台二进制、源码包、SHA-256，验证后创建不可覆盖的 GitHub Release；
+- `Release`：只接受属于 `main` 的稳定 `vX.Y.Z` Tag，自动构建六平台二进制、源码包和 SHA-256；workflow 拒绝覆盖已存在的同名 Release，但未启用 GitHub 平台级 immutable；
 - `Live Smoke`：仅允许 `main`，在受保护 Environment 与受控 self-hosted runner 上执行真实租户只读验收；
 - Dependabot：Go Module、NPM、GitHub Actions 与 Docker 更新；
 - Issue/PR Template、安全策略、贡献指南和发布脚本。

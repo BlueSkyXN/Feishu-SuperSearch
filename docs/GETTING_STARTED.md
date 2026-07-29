@@ -6,26 +6,26 @@
 
 | 系统 | 文件名 |
 |---|---|
-| macOS Apple Silicon | `SuperFeishuSearch-1.0.2-darwin-arm64.tar.gz` |
-| macOS Intel | `SuperFeishuSearch-1.0.2-darwin-amd64.tar.gz` |
-| Linux x86-64 | `SuperFeishuSearch-1.0.2-linux-amd64.tar.gz` |
-| Linux ARM64 | `SuperFeishuSearch-1.0.2-linux-arm64.tar.gz` |
-| Windows x86-64 | `SuperFeishuSearch-1.0.2-windows-amd64.zip` |
-| Windows ARM64 | `SuperFeishuSearch-1.0.2-windows-arm64.zip` |
+| macOS Apple Silicon | `SuperFeishuSearch-1.0.3-darwin-arm64.tar.gz` |
+| macOS Intel | `SuperFeishuSearch-1.0.3-darwin-amd64.tar.gz` |
+| Linux x86-64 | `SuperFeishuSearch-1.0.3-linux-amd64.tar.gz` |
+| Linux ARM64 | `SuperFeishuSearch-1.0.3-linux-arm64.tar.gz` |
+| Windows x86-64 | `SuperFeishuSearch-1.0.3-windows-amd64.zip` |
+| Windows ARM64 | `SuperFeishuSearch-1.0.3-windows-arm64.zip` |
 
 macOS/Linux：
 
 ```bash
-tar -xzf SuperFeishuSearch-1.0.2-<os>-<arch>.tar.gz
-cd SuperFeishuSearch-1.0.2-<os>-<arch>
+tar -xzf SuperFeishuSearch-1.0.3-<os>-<arch>.tar.gz
+cd SuperFeishuSearch-1.0.3-<os>-<arch>
 ./sfs version
 ```
 
 Windows PowerShell：
 
 ```powershell
-Expand-Archive .\SuperFeishuSearch-1.0.2-windows-amd64.zip
-cd .\SuperFeishuSearch-1.0.2-windows-amd64
+Expand-Archive .\SuperFeishuSearch-1.0.3-windows-amd64.zip
+cd .\SuperFeishuSearch-1.0.3-windows-amd64
 .\sfs.exe version
 ```
 

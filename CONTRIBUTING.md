@@ -67,7 +67,7 @@ make coverage
 需要验证跨平台发布包时：
 
 ```bash
-make package VERSION=1.0.2
+make package VERSION=1.0.3
 ```
 
 ## 代码边界
