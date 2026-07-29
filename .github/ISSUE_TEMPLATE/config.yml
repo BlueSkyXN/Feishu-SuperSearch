@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 私密安全报告
+    url: https://github.com/BlueSkyXN/Feishu-SuperSearch/security/advisories/new
+    about: Token 泄露、越权、命令注入或其他安全问题请从这里报告。

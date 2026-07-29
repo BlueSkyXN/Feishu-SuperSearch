@@ -1,0 +1,15 @@
+/bin/
+/dist/
+/.tmp/
+/local/
+/.visual-brainstorming/
+/web/node_modules/
+/web/dist/
+/minutes/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.test
+*.out
+.DS_Store

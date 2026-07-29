@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superfeishu.dev/schemas/provider-jsonrpc-v1.json",
+  "title": "SuperFeishuSearch executable Provider protocol",
+  "description": "One JSON-RPC 2.0 request is written to stdin. The provider writes one response to stdout and exits.",
+  "oneOf": [
+    {"$ref": "#/$defs/request"},
+    {"$ref": "#/$defs/response"}
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "properties": {
+        "jsonrpc": {"const": "2.0"},
+        "id": {"type": "integer"},
+        "method": {"enum": ["health", "search", "query", "fetch", "expand", "resolve"]},
+        "params": {}
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "properties": {
+        "jsonrpc": {"const": "2.0"},
+        "id": {"type": "integer"},
+        "result": {},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {"code": {"type": "integer"}, "message": {"type": "string"}, "data": {}},
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [{"required": ["result"]}, {"required": ["error"]}],
+      "additionalProperties": false
+    }
+  }
+}

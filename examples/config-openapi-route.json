@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "backend": "larkcli",
+  "runtime": {
+    "global_concurrency": 6,
+    "provider_timeout": "5s",
+    "listen": "127.0.0.1:3765"
+  },
+  "storage": {
+    "type": "sqlite",
+    "path": "~/.sfs/sfs.db",
+    "ttl": "45m"
+  },
+  "lark_cli": {
+    "executable": "lark-cli",
+    "profile_args": [],
+    "timeout": "10s",
+    "max_stdout_bytes": 16777216,
+    "max_stderr_bytes": 4194304
+  },
+  "open_api": {
+    "enabled": true,
+    "app_id": "cli_xxx",
+    "base_url": "https://open.feishu.cn",
+    "token_env": "FEISHU_USER_ACCESS_TOKEN",
+    "user_open_id": "",
+    "timeout": "10s",
+    "max_response_bytes": 16777216
+  },
+  "providers": {
+    "enabled": [
+      "docs",
+      "messages",
+      "chats",
+      "people",
+      "minutes",
+      "meetings",
+      "calendar",
+      "tasks",
+      "mail",
+      "base",
+      "sheets"
+    ],
+    "routes": {
+      "docs": {
+        "search": "openapi.docs",
+        "fetch": "larkcli.docs"
+      }
+    }
+  },
+  "planner": {
+    "type": "rules"
+  },
+  "strategy": {
+    "profile": "balanced",
+    "fusion": "weighted_rrf",
+    "pagination": "adaptive",
+    "source_quota": true,
+    "k0": 60
+  },
+  "replay": {
+    "mode": "off",
+    "dir": "~/.sfs/replay"
+  }
+}

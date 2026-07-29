@@ -1,0 +1,10 @@
+{
+  "missing_scope": {"ok":false,"identity":"user","error":{"type":"authorization","subtype":"missing_scope","code":99991679,"message":"missing scope","hint":"grant the required read scope"}},
+  "identity": {"ok":false,"identity":"user","error":{"type":"authorization","subtype":"token_expired","message":"authorization token expired"}},
+  "rate_limit": {"ok":false,"identity":"user","error":{"type":"rate_limit","subtype":"too_many_requests","code":99991400,"message":"rate limit exceeded"}},
+  "validation": {"ok":false,"identity":"user","error":{"type":"validation","subtype":"invalid_argument","message":"invalid argument"}},
+  "not_found": {"ok":false,"identity":"user","error":{"type":"not_found","subtype":"resource_not_found","message":"resource not found"}},
+  "timeout": {"ok":false,"identity":"user","error":{"type":"upstream","subtype":"timeout","message":"temporary timeout"}},
+  "server_error": {"ok":false,"identity":"user","error":{"type":"upstream","subtype":"5xx","message":"upstream 5xx"}},
+  "schema": {"ok":false,"identity":"user","error":{"type":"compatibility","subtype":"schema_changed","message":"response schema incompatible"}}
+}

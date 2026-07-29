@@ -1,0 +1,13 @@
+.git
+.tmp
+.visual-brainstorming
+bin
+dist
+local
+web/node_modules
+web/dist
+minutes
+**/__pycache__
+.DS_Store
+*.out
+*.test

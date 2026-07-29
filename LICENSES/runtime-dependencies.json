@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "license_files": {
+    "LICENSES/MIT-larksuite-oapi-sdk-go.txt": "29d16ac53b7f3f8513fb4c6ca4e683bed3f958f9a53f27cb0a840b4f07c5f5b4",
+    "LICENSES/runtime/go-dustin-go-humanize.txt": "a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71",
+    "LICENSES/runtime/go-golang-x-exp.txt": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+    "LICENSES/runtime/go-golang-x-sys.txt": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+    "LICENSES/runtime/go-golang-x-text.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "LICENSES/runtime/go-google-uuid.txt": "0a8d61ed3cbfd5312326e8126c31ce9c627a283adc99131b56896d29ada04b2d",
+    "LICENSES/runtime/go-jsonschema-v6-Apache-2.0.txt": "c8858a5a76440bbca484e134cf7df46385d090dd18b2c58e650f939258802e5b",
+    "LICENSES/runtime/go-mattn-go-isatty.txt": "08eab1118c80885fa1fa6a6dd7303f65a379fcb3733e063d20d1bbc2c76e6fa1",
+    "LICENSES/runtime/go-modernc-libc-Go.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "LICENSES/runtime/go-modernc-libc-honnef-netdb.txt": "657707d00e00d3077e4ccfac2d6a123ad908c3f503370798eb2cb52e68e135a6",
+    "LICENSES/runtime/go-modernc-libc-musl.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "LICENSES/runtime/go-modernc-libc.txt": "95ff867eb55a56935fa7492406cfa953fb7c13ca73f4c0a86ae05756b4605600",
+    "LICENSES/runtime/go-modernc-mathutil.txt": "bfa9bf72a72ca009fd62a8f84fca3dca67e51d93af96352723646599898b6cf5",
+    "LICENSES/runtime/go-modernc-memory-Go.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "LICENSES/runtime/go-modernc-memory-mmap-Go.txt": "121d4529907b7d822d7665bde14ae142dc8a119356991fbc759ed562444dc02f",
+    "LICENSES/runtime/go-modernc-memory.txt": "59895e669f48f168b6b858358f6005779cdf40a265f7828813061b56af67b496",
+    "LICENSES/runtime/go-modernc-sqlite.txt": "c6fe05491a60ae13bcd223088d2705e36dede24e5587226231d2459ada5c4822",
+    "LICENSES/runtime/go-ncruces-go-strftime.txt": "38ae43959daf953a393a585b2988672cb65a5a541aca0d0be5e72595a0a16883",
+    "LICENSES/runtime/go-remyoudompheng-bigfft.txt": "dd26a7abddd02e2d0aba97805b31f248ef7835d9e10da289b22e3b8ab78b324d",
+    "LICENSES/runtime/npm-js-tokens.txt": "2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1",
+    "LICENSES/runtime/npm-loose-envify.txt": "4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893",
+    "LICENSES/runtime/npm-react-family.txt": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+  },
+  "go_modules": {
+    "github.com/dustin/go-humanize": {
+      "version": "v1.0.1",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/go-dustin-go-humanize.txt"]
+    },
+    "github.com/google/uuid": {
+      "version": "v1.6.0",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-google-uuid.txt"]
+    },
+    "github.com/larksuite/oapi-sdk-go/v3": {
+      "version": "v3.9.9",
+      "license": "MIT",
+      "license_files": ["LICENSES/MIT-larksuite-oapi-sdk-go.txt"]
+    },
+    "github.com/mattn/go-isatty": {
+      "version": "v0.0.20",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/go-mattn-go-isatty.txt"]
+    },
+    "github.com/ncruces/go-strftime": {
+      "version": "v0.1.9",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/go-ncruces-go-strftime.txt"]
+    },
+    "github.com/remyoudompheng/bigfft": {
+      "version": "v0.0.0-20230129092748-24d4a6f8daec",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-remyoudompheng-bigfft.txt"]
+    },
+    "github.com/santhosh-tekuri/jsonschema/v6": {
+      "version": "v6.0.2",
+      "license": "Apache-2.0",
+      "license_files": ["LICENSES/runtime/go-jsonschema-v6-Apache-2.0.txt"]
+    },
+    "golang.org/x/exp": {
+      "version": "v0.0.0-20250620022241-b7579e27df2b",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-golang-x-exp.txt"]
+    },
+    "golang.org/x/sys": {
+      "version": "v0.34.0",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-golang-x-sys.txt"]
+    },
+    "golang.org/x/text": {
+      "version": "v0.14.0",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-golang-x-text.txt"]
+    },
+    "modernc.org/libc": {
+      "version": "v1.66.3",
+      "license": "BSD-3-Clause AND MIT",
+      "license_files": [
+        "LICENSES/runtime/go-modernc-libc.txt",
+        "LICENSES/runtime/go-modernc-libc-Go.txt",
+        "LICENSES/runtime/go-modernc-libc-honnef-netdb.txt",
+        "LICENSES/runtime/go-modernc-libc-musl.txt"
+      ]
+    },
+    "modernc.org/mathutil": {
+      "version": "v1.7.1",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-modernc-mathutil.txt"]
+    },
+    "modernc.org/memory": {
+      "version": "v1.11.0",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "LICENSES/runtime/go-modernc-memory.txt",
+        "LICENSES/runtime/go-modernc-memory-Go.txt",
+        "LICENSES/runtime/go-modernc-memory-mmap-Go.txt"
+      ]
+    },
+    "modernc.org/sqlite": {
+      "version": "v1.38.2",
+      "license": "BSD-3-Clause",
+      "license_files": ["LICENSES/runtime/go-modernc-sqlite.txt"]
+    }
+  },
+  "npm_packages": {
+    "js-tokens": {
+      "version": "4.0.0",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/npm-js-tokens.txt"]
+    },
+    "loose-envify": {
+      "version": "1.4.0",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/npm-loose-envify.txt"]
+    },
+    "react": {
+      "version": "18.3.1",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/npm-react-family.txt"]
+    },
+    "react-dom": {
+      "version": "18.3.1",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/npm-react-family.txt"]
+    },
+    "scheduler": {
+      "version": "0.23.2",
+      "license": "MIT",
+      "license_files": ["LICENSES/runtime/npm-react-family.txt"]
+    }
+  }
+}

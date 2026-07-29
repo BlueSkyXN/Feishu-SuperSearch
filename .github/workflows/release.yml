@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable X.Y.Z version to package without publishing"
+        required: true
+        default: "1.0.1"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Validate and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and validate release identity
+        id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${INPUT_VERSION#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Only stable X.Y.Z versions are supported: $version" >&2
+            exit 2
+          fi
+          commit="$(git rev-parse HEAD)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            test "$(git rev-list -n 1 "$GITHUB_REF_NAME")" = "$commit"
+            git rev-parse --verify refs/remotes/origin/main >/dev/null
+            git merge-base --is-ancestor "$commit" origin/main || {
+              echo "Tag $GITHUB_REF_NAME points outside origin/main: $commit" >&2
+              exit 1
+            }
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=SuperFeishuSearch-${version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "Packaging version=$version commit=$commit"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify repository
+        run: make verify
+
+      - name: Install and audit web dependencies
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --audit-level=high
+
+      - name: Verify web and embedded static assets
+        run: make web-verify
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run web end-to-end tests
+        run: make web-e2e
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tmp/playwright
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Coverage gate (total >= 65%, core >= 75%)
+        run: make coverage
+
+      - name: Run HTTP and embedded Web smoke
+        run: make http-smoke
+
+      - name: Check declared version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: ./scripts/check-version.sh "$VERSION"
+
+      - name: Build release archives
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        run: make package-only VERSION="$VERSION" COMMIT="$COMMIT"
+
+      - name: Verify release archives
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        run: make release-verify VERSION="$VERSION" COMMIT="$COMMIT"
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    name: Publish immutable GitHub Release
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release verifier
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Download verified release bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.package.outputs.artifact_name }}
+          path: dist/release
+
+      - name: Re-verify downloaded release bundle
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          COMMIT: ${{ needs.package.outputs.commit }}
+        run: make release-verify VERSION="$VERSION" COMMIT="$COMMIT"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; refusing to replace immutable assets" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/release/* \
+            --verify-tag \
+            --title "SuperFeishuSearch $VERSION" \
+            --generate-notes

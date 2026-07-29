@@ -1,0 +1,63 @@
+name: Live Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-smoke-readonly
+  cancel-in-progress: false
+
+jobs:
+  main-guard:
+    name: Require main
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject unreviewed refs
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main" || {
+            echo "Live Smoke only accepts refs/heads/main; got $GITHUB_REF" >&2
+            exit 1
+          }
+          echo "Live Smoke commit: $GITHUB_SHA"
+
+  readonly-acceptance:
+    name: Read-only tenant acceptance
+    needs: main-guard
+    runs-on: [self-hosted, sfs-live]
+    timeout-minutes: 20
+    environment: live-readonly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Bind evidence to commit
+        run: echo "Read-only tenant acceptance commit=$GITHUB_SHA"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run read-only live smoke
+        env:
+          SFS_LIVE_BACKEND: ${{ vars.SFS_LIVE_BACKEND || 'larkcli' }}
+          SFS_LIVE_PROFILE: ${{ secrets.SFS_LIVE_PROFILE }}
+          SFS_LIVE_QUERY: ${{ secrets.SFS_LIVE_QUERY }}
+          SFS_LIVE_PERSON_QUERY: ${{ secrets.SFS_LIVE_PERSON_QUERY }}
+          SFS_LIVE_DOC_ID: ${{ secrets.SFS_LIVE_DOC_ID }}
+          SFS_LIVE_MESSAGE_ID: ${{ secrets.SFS_LIVE_MESSAGE_ID }}
+          SFS_LIVE_MINUTE_ID: ${{ secrets.SFS_LIVE_MINUTE_ID }}
+          SFS_LIVE_TASK_ID: ${{ secrets.SFS_LIVE_TASK_ID }}
+          SFS_LIVE_MEETING_ID: ${{ secrets.SFS_LIVE_MEETING_ID }}
+          SFS_LIVE_BASE_CONTAINER: ${{ secrets.SFS_LIVE_BASE_CONTAINER }}
+          SFS_LIVE_SHEET_CONTAINER: ${{ secrets.SFS_LIVE_SHEET_CONTAINER }}
+          SFS_LIVE_SHEET_ID: ${{ secrets.SFS_LIVE_SHEET_ID }}
+        run: make live-smoke

@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Repository checks
+        run: make verify
+
+      - name: Coverage gate (total >= 65%, core >= 75%)
+        run: make coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .tmp/coverage.out
+          if-no-files-found: error
+          retention-days: 14
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Web unit, build, and static drift verification
+        run: make web-verify
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Web end-to-end tests
+        run: make web-e2e
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .tmp/playwright
+          if-no-files-found: ignore
+          retention-days: 14
+
+  platform:
+    name: Platform / ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-native
+            runner: ubuntu-latest
+            goos: linux
+            binary: bin/sfs
+          - name: macos-native
+            runner: macos-latest
+            goos: darwin
+            binary: bin/sfs
+          - name: windows-native
+            runner: windows-latest
+            goos: windows
+            binary: bin/sfs.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build native binary
+        shell: bash
+        env:
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          test "$(go env GOOS)" = "${{ matrix.goos }}"
+          goarch="$(go env GOARCH)"
+          case "$RUNNER_ARCH:$goarch" in
+            X64:amd64|ARM64:arm64) ;;
+            *) echo "runner.arch=$RUNNER_ARCH does not match GOARCH=$goarch" >&2; exit 1 ;;
+          esac
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Building ${{ matrix.goos }}/$goarch on $RUNNER_ARCH"
+          mkdir -p bin
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath \
+            -ldflags "-s -w -X main.version=ci -X main.commit=${GITHUB_SHA} -X main.builtAt=${built_at}" \
+            -o "${{ matrix.binary }}" ./cmd/sfs
+          version_output="$("${{ matrix.binary }}" version)"
+          echo "$version_output"
+          grep -F "commit=${GITHUB_SHA}" <<<"$version_output"
+          go version -m "${{ matrix.binary }}" | grep -F $'build\tCGO_ENABLED=0'
+          go version -m "${{ matrix.binary }}" | grep -F $'build\tGOOS=${{ matrix.goos }}'
+          go version -m "${{ matrix.binary }}" | grep -F $'build\tGOARCH='"$goarch"
+
+      - name: Upload native binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: sfs-${{ matrix.goos }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7
+
+  docker:
+    name: Docker image
+    needs: [verify, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t superfeishusearch:ci .
+
+      - name: Smoke image
+        run: |
+          version_output="$(docker run --rm superfeishusearch:ci version)"
+          echo "$version_output"
+          grep -F "commit=${GITHUB_SHA}" <<<"$version_output"
+          docker run --rm superfeishusearch:ci \
+            --backend mock --session-dir /tmp/sessions --output json \
+            search "A 项目 延期" --sources docs,messages

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superfeishu.dev/schemas/retrieval-plan-v1.json",
+  "title": "SuperFeishuSearch RetrievalPlan v1",
+  "type": "object",
+  "required": [
+    "version",
+    "nodes"
+  ],
+  "properties": {
+    "version": {
+      "const": "retrieval-plan/v1"
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reuse": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "user",
+            "bot"
+          ]
+        },
+        "scope_key": {
+          "type": "string",
+          "readOnly": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "budget": {
+      "$ref": "#/$defs/budget"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "output": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "budget": {
+      "type": "object",
+      "properties": {
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_calls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_pages_per_source": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_fetches": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_expanded_nodes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "op"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "resolve",
+            "search",
+            "query",
+            "fetch",
+            "expand",
+            "merge",
+            "dedup",
+            "rank",
+            "limit",
+            "project",
+            "map_fetch"
+          ]
+        },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "request": {
+          "type": "object"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "backoff_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_backoff_ms": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

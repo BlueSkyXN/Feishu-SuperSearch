@@ -1,0 +1,13 @@
+{
+  "docs": {"ok":true,"data":{"results":[{"title":"缺少 ID"}]}},
+  "messages": {"ok":true,"data":{"messages":[{"content":"缺少 ID"}]}},
+  "chats": {"ok":true,"data":{"chats":[{"name":"缺少 ID"}]}},
+  "people": {"ok":true,"data":{"users":[{"name":"缺少 ID"}]}},
+  "minutes": {"ok":true,"data":{"minutes":[{"title":"缺少 ID"}]}},
+  "meetings": {"ok":true,"data":{"meetings":[{"topic":"缺少 ID"}]}},
+  "calendar": {"ok":true,"data":{"events":[{"calendar_id":"cal_demo","summary":"缺少 ID"}]}},
+  "tasks": {"ok":true,"data":{"tasks":[{"summary":"缺少 ID"}]}},
+  "mail": {"ok":true,"data":{"messages":[{"mailbox_id":"me","subject":"缺少 ID"}]}},
+  "base": {"ok":true,"data":{"record_id_list":[],"fields":["名称"],"data":[["缺少 ID"]]}},
+  "sheets": {"ok":true,"data":{"matches":[{"sheet_name":"Sheet1","value":"缺少 ID"}]}}
+}
