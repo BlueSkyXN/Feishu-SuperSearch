@@ -28,6 +28,15 @@ gitleaks git --staged --redact --no-banner --no-color .
 
 `make verify` 还包含文档、OpenAPI YAML 结构与重复键、工作流、运行时依赖许可证闭合集合、脚本语法和 Mock smoke。Coverage 与 Web 分别保留独立 target，便于本地按需运行；CI 会把它们全部作为必需检查执行。
 
+发布候选还必须在干净 Git checkout 中执行：
+
+```bash
+make package VERSION=1.0.2
+make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)"
+```
+
+`release-verify` 不只比较文件名：它将源码 ZIP/TAR 的每个 tracked 文件内容 SHA-256 和可执行模式与 Git HEAD blob 对齐，然后安全物化源码 ZIP，在不包含 `.git` 元数据的目录中重新运行完整 `make verify`。GitHub Actions 的只读 `package` Job 执行这条主动验证；拥有发布写权限的 `publish` Job 使用 `ARCHIVE_EXECUTION=skip`，仅做被动一致性复核，不执行下载归档中的代码。
+
 ## 3. 覆盖率
 
 ```bash
@@ -54,8 +63,8 @@ make coverage
 当前工作区最近一次 atomic profile 为：
 
 ```text
-整仓 71.9%（5409/7525）
-核心 76.5%（2153/2816）
+整仓 71.9%（5412/7528）
+核心 76.5%（2156/2819）
 ```
 
 该结果说明本机当前代码通过 gate；代码变化后必须重新生成 profile，且不能把它当作 exact-head GitHub CI 结果。

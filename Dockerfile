@@ -1,7 +1,7 @@
 FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY . .
-ARG VERSION=1.0.1
+ARG VERSION=1.0.2
 ARG COMMIT=dev
 ARG BUILT_AT=unknown
 RUN go test ./... && CGO_ENABLED=0 go build -buildvcs=false -trimpath \

@@ -26,4 +26,23 @@ for pair in "cmd/sfs/main.go:$MAIN" "Makefile:$MAKE" "Dockerfile:$DOCKER" "api/o
     failed=1
   fi
 done
+
+check_marker() {
+  local file=$1 marker=$2
+  if ! grep -Fq -- "$marker" "$ROOT/$file"; then
+    echo "$file is missing version marker: $marker" >&2
+    failed=1
+  fi
+}
+
+check_marker README.md "SuperFeishuSearch-$EXPECTED-darwin-arm64.tar.gz"
+check_marker docs/GETTING_STARTED.md "SuperFeishuSearch-$EXPECTED-darwin-arm64.tar.gz"
+check_marker docs/RELEASING.md "git tag -a v$EXPECTED"
+check_marker docs/GITHUB_ACTIONS.md "gh release view v$EXPECTED"
+check_marker docs/DEVELOPMENT.md "make package VERSION=$EXPECTED"
+check_marker docs/TESTING.md "make package VERSION=$EXPECTED"
+check_marker CONTRIBUTING.md "make package VERSION=$EXPECTED"
+check_marker .github/workflows/release.yml "default: \"$EXPECTED\""
+check_marker .github/ISSUE_TEMPLATE/bug_report.yml "sfs $EXPECTED commit=..."
+
 exit "$failed"

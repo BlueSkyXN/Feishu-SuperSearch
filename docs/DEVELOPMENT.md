@@ -218,5 +218,5 @@ make http-smoke
 发布相关变更再执行：
 
 ```bash
-make package VERSION=1.0.1
+make package VERSION=1.0.2
 ```

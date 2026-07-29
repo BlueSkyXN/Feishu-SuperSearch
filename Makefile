@@ -1,5 +1,6 @@
 SHELL := /bin/bash
-VERSION ?= 1.0.1
+VERSION ?= 1.0.2
+ARCHIVE_EXECUTION ?= required
 COMMIT ?= $(shell if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && test -z "$$(git status --porcelain --untracked-files=normal)"; then git rev-parse HEAD; else echo local-uncommitted; fi)
 BUILT_AT ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.builtAt=$(BUILT_AT)
@@ -112,7 +113,7 @@ package-only:
 	COMMIT=$(COMMIT) ./scripts/package-release.sh $(VERSION)
 
 release-verify:
-	python3 scripts/verify-release.py --dir dist/release --version $(VERSION) --commit $(COMMIT)
+	python3 scripts/verify-release.py --dir dist/release --version $(VERSION) --commit $(COMMIT) --archive-execution $(ARCHIVE_EXECUTION)
 
 clean:
 	rm -rf bin dist .tmp

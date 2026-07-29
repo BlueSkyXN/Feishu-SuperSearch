@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.2 - 2026-07-30
+
+### Fixed
+
+- 修复 GitHub Release 源码包在无 `.git` 环境或嵌套于其他 Git 仓库时，许可证清单验证错误依赖外层 Git index 的问题
+- 源码归档模式改为从 `LICENSES/` 文件系统闭合集合校验，并拒绝 symlink、非普通文件、缺失项和额外项
+
+### Release validation
+
+- Release verifier 现在会安全物化源码 ZIP、恢复文件模式，并在无 `.git` 的临时目录中重新执行完整 `make verify`
+- 只读 `package` 阶段执行二进制 smoke 与源码包无 `.git` 环境 `make verify`；拥有 `contents: write` 的 `publish` 阶段只做被动结构、校验和与内容复核，不执行归档代码
+- 增加独立源码树、外层 Git 仓库、额外许可证、symlink、exact Git root 和归档物化的回归测试
+
 ## 1.0.1 - 2026-07-30
 
 ### Added
@@ -60,7 +73,7 @@
 - lark-cli 真实只读验证中 docs/messages/chats/people/minutes/meetings/tasks 成功；calendar/mail 为 `missing_scope`；Base/Sheets 缺测试对象
 - direct OpenAPI 仅完成 httptest；因没有同时可用的 App ID 与 user access token，未做真实租户验收
 - GitHub CI、CodeQL、Tag 与 Release 属于动态交付证据，不在 Changelog 中固化状态；必须按 exact SHA 从 Actions 和 9 个 Release 资产回读
-- 固定构建参数下两组 9 个候选文件逐字节一致；source archive 与安全工作树一致且解压后 `make verify` 通过
+- 固定构建参数下两组 9 个候选文件逐字节一致；source archive 与安全工作树一致
 
 ### Documentation
 

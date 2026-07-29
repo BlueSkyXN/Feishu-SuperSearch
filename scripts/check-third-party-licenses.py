@@ -94,7 +94,46 @@ def validate_entries(label: str, raw: object, known_files: set[str]) -> tuple[di
     return versions, used_files
 
 
+def exact_git_root() -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        git_root = Path(result.stdout.strip()).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return git_root if git_root == ROOT.resolve(strict=True) else None
+
+
+def archived_license_files() -> set[str]:
+    licenses = ROOT / "LICENSES"
+    if licenses.is_symlink() or not licenses.is_dir():
+        fail("LICENSES must be a regular directory in a source archive")
+    files: set[str] = set()
+    for path in licenses.rglob("*"):
+        relative = path.relative_to(ROOT).as_posix()
+        if path.is_symlink():
+            fail(f"source archive LICENSES entry is a symlink: {relative}")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            fail(f"source archive LICENSES entry is not a regular file: {relative}")
+        files.add(relative)
+    return files
+
+
 def tracked_license_files() -> set[str]:
+    if exact_git_root() is None:
+        return archived_license_files()
     result = subprocess.run(
         ["git", "ls-files", "-z", "--", "LICENSES"],
         cwd=ROOT,

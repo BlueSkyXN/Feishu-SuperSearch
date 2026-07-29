@@ -121,11 +121,12 @@ Tag workflow 首先校验：
 - 每个运行包包含 `config.demo.json`、运行文档、`THIRD_PARTY_NOTICES.md` 和完整 `LICENSES/`；
 - `make verify` 会对六个发布目标的 Go 运行时模块并集、Web 生产依赖、版本和许可证 SHA-256 做闭合集合检查，新增依赖但未补 notice 时直接失败；
 - Linux amd64 `version` 与离线 Demo Search 实际运行；
-- source ZIP/TAR 文件和内容一致；
-- source archive 与 `git ls-files` 完全一致；
+- source ZIP/TAR 的文件内容和可执行模式一致；
+- source archive 与 Git HEAD 全部 tracked blob 的文件名、内容 SHA-256 和模式完全一致；
 - `local/`、`dist/`、`bin/`、`.tmp/`、`minutes/`、`.env*` 等敏感/临时路径未进入源码包。
+- source ZIP 被安全物化到无 `.git` 的临时目录，并重新执行完整 `make verify`；源码包本身不可独立验证时不发布。
 
-`package` Job 只有 `contents: read`。验证后的 bundle 作为不可变 Actions artifact 传给独立 `publish` Job；artifact 名由 `package` 输出给下游，单独重跑失败的 `publish` Job 也不会漂移到不存在的 `run_attempt` 名称。只有 `publish` 获得 `contents: write`，下载后再次执行同一 verifier，再创建 GitHub Release。已存在的同名 Release 不会被覆盖。
+`package` Job 只有 `contents: read`，负责实际运行 Linux amd64 Demo 与源码包 `make verify`。验证后的 bundle 作为不可变 Actions artifact 传给独立 `publish` Job；artifact 名由 `package` 输出给下游，单独重跑失败的 `publish` Job 也不会漂移到不存在的 `run_attempt` 名称。只有 `publish` 获得 `contents: write`，下载后以 `ARCHIVE_EXECUTION=skip` 运行同一 verifier 的被动校验路径，不执行归档内二进制或源码，再创建 GitHub Release。已存在的同名 Release 不会被覆盖。
 
 手动 `workflow_dispatch` 只生成并验证候选 artifact，不创建 Release。
 
@@ -193,8 +194,8 @@ Security / CodeQL
 ```bash
 gh pr checks <PR_NUMBER>
 gh run list --branch main --limit 20
-gh release view v1.0.1 --json tagName,targetCommitish,url,assets
-gh release download v1.0.1 --pattern SHA256SUMS
+gh release view v1.0.2 --json tagName,targetCommitish,url,assets
+gh release download v1.0.2 --pattern SHA256SUMS
 ```
 
 需要同时记录：PR head SHA、merge SHA、main workflow SHA、Tag SHA、Release URL、9 个资产名和校验和。只看到绿色 badge 或 Release 页面标题不够。
