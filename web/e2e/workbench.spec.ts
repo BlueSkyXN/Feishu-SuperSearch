@@ -77,6 +77,19 @@ test("390x844 键盘流程无横向溢出", async ({ page }) => {
   await input.fill("A 项目 延期");
   await input.press("Control+Enter");
   await expect(page.getByText("A 项目上线计划与风险")).toBeVisible();
+  const mobileSidebarStyles = await page.locator(".sidebar").evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    position: getComputedStyle(element).position,
+  }));
+  expect(mobileSidebarStyles).toEqual({
+    maxHeight: "none",
+    overflowY: "visible",
+    position: "static",
+  });
+  await input.fill("临时未提交内容");
+  await page.getByRole("button", { name: /A 项目 延期/ }).first().click();
+  await expect(input).toHaveValue("A 项目 延期");
   const layout = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
     const overflow = Array.from(document.querySelectorAll<HTMLElement>("body *")).filter((element) => {
