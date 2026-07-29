@@ -35,7 +35,7 @@ make package VERSION=1.0.2
 make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)"
 ```
 
-`release-verify` 不只比较文件名：它将源码 ZIP/TAR 的每个 tracked 文件内容 SHA-256 和可执行模式与 Git HEAD blob 对齐，然后安全物化源码 ZIP，在不包含 `.git` 元数据的目录中重新运行完整 `make verify`。GitHub Actions 的只读 `package` Job 执行这条主动验证；拥有发布写权限的 `publish` Job 使用 `ARCHIVE_EXECUTION=skip`，仅做被动一致性复核，不执行下载归档中的代码。
+`release-verify` 不只比较文件名：它将源码 ZIP/TAR 的每个 tracked 文件内容 SHA-256 和可执行模式与 Git HEAD blob 对齐，然后安全物化源码 ZIP，在不包含 `.git` 元数据的目录中重新运行完整 `make verify`。默认 `ARCHIVE_EXECUTION=required` 还会执行 Linux amd64 运行包，因此应在 Linux amd64 使用；非 Linux 维护机可用 `ARCHIVE_EXECUTION=source` 只执行源码验证。GitHub Actions 的只读 `package` Job 执行完整主动验证；拥有发布写权限的 `publish` Job 使用 `ARCHIVE_EXECUTION=skip`，仅做被动一致性复核，不执行下载归档中的代码。
 
 ## 3. 覆盖率
 

@@ -152,7 +152,13 @@ make package VERSION=1.0.2
 make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)"
 ```
 
-打包脚本要求 clean worktree，并用 `git archive HEAD` 生成 source archive。普通用户无需运行这些命令。
+默认 `ARCHIVE_EXECUTION=required` 会执行 Linux amd64 运行包和源码包，必须在 Linux amd64 环境运行。macOS 或其他维护机只验证源码执行路径时，使用：
+
+```bash
+make release-verify VERSION=1.0.2 COMMIT="$(git rev-parse HEAD)" ARCHIVE_EXECUTION=source
+```
+
+`ARCHIVE_EXECUTION=skip` 只允许做被动结构和内容复核，不能替代正式发布的主动门禁。打包脚本要求 clean worktree，并用 `git archive HEAD` 生成 source archive。普通用户无需运行这些命令，正式资产仍只由 GitHub Actions 生成。
 
 ## 10. 回滚
 

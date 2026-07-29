@@ -221,7 +221,7 @@ def verify_runtime_archive(
     goos: str,
     goarch: str,
     suffix: str,
-    execute_archive: bool,
+    execute_runtime: bool,
 ) -> None:
     root = f"SuperFeishuSearch-{version}-{goos}-{goarch}"
     archive_path = directory / f"{root}{suffix}"
@@ -260,20 +260,32 @@ def verify_runtime_archive(
         raw = binary_entry.data
         if version.encode() not in raw or commit.encode() not in raw:
             fail(f"{archive_path.name} does not embed version={version} and commit={commit}")
-        if execute_archive and goos == "linux" and goarch == "amd64":
-            version_result = subprocess.run([str(binary), "version"], check=False, capture_output=True, text=True)
+        if execute_runtime and goos == "linux" and goarch == "amd64":
+            try:
+                version_result = subprocess.run(
+                    [str(binary), "version"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                fail(f"Linux amd64 version smoke could not complete: {error}")
             expected_version = f"sfs {version} commit={commit} "
             if version_result.returncode != 0 or expected_version not in version_result.stdout:
                 fail(f"Linux amd64 version smoke failed: {version_result.stdout.strip()} {version_result.stderr.strip()}")
             config_path = Path(temporary) / "config.demo.json"
             config_path.write_bytes(files["config.demo.json"].data or b"")
-            smoke = subprocess.run(
-                [str(binary), "--config", str(config_path), "--output", "json", "search", "A 项目 延期", "--sources", "docs,messages"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            try:
+                smoke = subprocess.run(
+                    [str(binary), "--config", str(config_path), "--output", "json", "search", "A 项目 延期", "--sources", "docs,messages"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                fail(f"Linux amd64 offline demo smoke could not complete: {error}")
             if smoke.returncode != 0:
                 fail(f"Linux amd64 offline demo smoke failed: {smoke.stderr.strip()}")
             payload = json.loads(smoke.stdout)
@@ -370,7 +382,7 @@ def verify_source_archives(
     directory: Path,
     version: str,
     repository: Path,
-    execute_archive: bool,
+    execute_source: bool,
 ) -> None:
     root = f"SuperFeishuSearch-{version}-source"
     tar_entries = read_archive(directory / f"{root}.tar.gz")
@@ -409,7 +421,7 @@ def verify_source_archives(
     ):
         if required not in tar_inventory:
             fail(f"source archives are missing {required}")
-    if execute_archive:
+    if execute_source:
         verify_materialized_source(zip_entries, root)
 
 
@@ -420,9 +432,9 @@ def main() -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument(
         "--archive-execution",
-        choices=("required", "skip"),
+        choices=("required", "source", "skip"),
         default="required",
-        help="execute Linux demo and source make verify, or perform passive archive verification only",
+        help="execute Linux demo and source verify, source verify only, or passive archive verification only",
     )
     args = parser.parse_args()
     directory, directory_entries = validate_release_directory(args.dir)
@@ -449,7 +461,8 @@ def main() -> int:
     repository = Path(__file__).resolve().parent.parent
     license_hashes = repository_license_hashes(repository)
     verify_checksums(directory, archive_names)
-    execute_archive = args.archive_execution == "required"
+    execute_runtime = args.archive_execution == "required"
+    execute_source = args.archive_execution != "skip"
     for target in TARGETS:
         verify_runtime_archive(
             directory,
@@ -457,9 +470,9 @@ def main() -> int:
             commit,
             license_hashes,
             *target,
-            execute_archive=execute_archive,
+            execute_runtime=execute_runtime,
         )
-    verify_source_archives(directory, version, repository, execute_archive)
+    verify_source_archives(directory, version, repository, execute_source)
     print(f"Verified 9 release files for SuperFeishuSearch {version} at {commit}")
     return 0
 
