@@ -12,6 +12,7 @@
 - Release verifier 现在会安全物化源码 ZIP、恢复文件模式，并在无 `.git` 的临时目录中重新执行完整 `make verify`
 - 只读 `package` 阶段执行二进制 smoke 与源码包无 `.git` 环境 `make verify`；拥有 `contents: write` 的 `publish` 阶段只做被动结构、校验和与内容复核，不执行归档代码
 - Release verifier 的运行命令均有局部超时和统一错误映射；非 Linux 维护机可用 `ARCHIVE_EXECUTION=source` 单独执行源码包验证
+- macOS 候选打包会移除 Release 输出根目录的 `.DS_Store`，避免 OS 元数据污染 9 资产集合和 `SHA256SUMS`
 - 增加独立源码树、外层 Git 仓库、额外许可证、symlink、exact Git root 和归档物化的回归测试
 
 ## 1.0.1 - 2026-07-30
