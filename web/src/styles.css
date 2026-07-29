@@ -1142,8 +1142,18 @@ button:disabled {
 .sidebar {
   position: sticky;
   top: 88px;
+  align-self: start;
   display: grid;
   gap: 16px;
+}
+
+@media (min-width: 881px) {
+  .sidebar {
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
 }
 
 .side-card {

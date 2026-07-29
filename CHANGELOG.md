@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.3 - 2026-07-30
+
+### Fixed
+
+- 修复低高度桌面窗口中 sticky 侧栏超出视口后无法访问 Session 历史的问题；侧栏现在在桌面布局内独立滚动，移动布局保持自然文档流
+- 将桌面端端到端回归视口收紧到 `1280x720`，并验证侧栏滚动后可恢复历史 Session
+
+### Documentation
+
+- 明确 Release workflow 只保证拒绝覆盖同名 Release；当前未启用 GitHub 平台级 immutable，不再使用强于实际能力的表述
+
 ## 1.0.2 - 2026-07-30
 
 ### Fixed
@@ -64,7 +75,7 @@
 - Docs Search 对 Sheet/Base/File 候选分类为不可直接 Docx Fetch，避免把结构化对象或普通文件 token 传给 `docs +fetch`
 - MCP `serverInfo.version` 改为使用实际二进制版本，不再固定返回 `1.0.0`
 - 让 GitHub Actions YAML 检查脚本兼容 macOS 系统 Ruby 2.6
-- GitHub Release 已存在时拒绝覆盖同 Tag 资产，保持发布不可变
+- GitHub Release 已存在时，当前 workflow 拒绝覆盖同 Tag 资产
 
 ### Verification
 

@@ -1,11 +1,11 @@
-# Implementation Status — v1.0.2
+# Implementation Status — v1.0.3
 
 状态日期：2026-07-30
-版本：1.0.2
+版本：1.0.3
 
 ## 当前开发状态
 
-本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。本文记录 `v1.0.2` 的源码能力与截至状态日期的本地/真实租户验收快照；GitHub CI、Tag 和 Release 是动态状态，不在静态文档中硬编码为成功，请按具体 SHA 从 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 与 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 回读。
+本表区分“代码存在”“本机验证通过”“真实租户验收”和“远程 CI/Release”。本文记录 `v1.0.3` 的源码能力与截至状态日期的本地/真实租户验收快照；GitHub CI、Tag 和 Release 是动态状态，不在静态文档中硬编码为成功，请按具体 SHA 从 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 与 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 回读。
 
 | 模块 | 状态 | 说明 |
 |---|---:|---|
@@ -89,7 +89,7 @@ exact-head GitHub CI / CodeQL
 
 缺少上述证据时，只能说明对应本地代码或离线测试通过，不能声称“11 来源真实租户全部通过”。GitHub 仓库、CI/CD、Release 与离线完整预览可以独立完成；当前 calendar/mail 必须明确保留为 `missing_scope`，Base/Sheets 必须保留为缺测试对象；direct OpenAPI 必须保留为未做真实验收。
 
-正式交付证据只能来自：PR exact-head checks、合并后的 main checks、指向同一 main SHA 的 `v1.0.2` Tag、成功的 Release workflow 和 GitHub Release 下载资产。本机 `dist/`、`bin/`、ZIP 或历史测试记录都不能替代这条链。
+正式交付证据只能来自：PR exact-head checks、合并后的 main checks、指向同一 main SHA 的 `v1.0.3` Tag、成功的 Release workflow 和 GitHub Release 下载资产。本机 `dist/`、`bin/`、ZIP 或历史测试记录都不能替代这条链。
 
 ## 后续真实环境补验
 
