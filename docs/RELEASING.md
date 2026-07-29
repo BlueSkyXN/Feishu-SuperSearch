@@ -71,7 +71,7 @@ git tag -a v1.0.1 -m "SuperFeishuSearch 1.0.1"
 git push origin v1.0.1
 ```
 
-Release workflow 会重新验证 Tag commit 属于 `origin/main`。Tag 不在 main、版本不匹配、测试失败、资产不完整或同名 Release 已存在时，发布直接失败。
+Release workflow 会重新验证 Tag commit 等于触发发布时的 `origin/main` head。Tag 指向旧的 main 历史提交、版本不匹配、测试失败、资产不完整或同名 Release 已存在时，发布直接失败。
 
 ## 5. Release workflow
 

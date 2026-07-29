@@ -284,4 +284,4 @@ direct OpenAPI：没有同时可用的 App ID 与 user access token，未执行�
 
 ## 13. GitHub Actions
 
-CI workflow 已配置为在 Linux 上运行完整 verify/race 和固定 coverage gate；独立 Web Job 配置了 `npm ci`、Vitest、typecheck、生产构建、静态漂移检查与 Playwright Chromium E2E；平台矩阵和 Docker、安全工作流也已配置。当前 exact-head GitHub CI 与 CodeQL 尚未运行，不能把这些配置项写成远程通过。详见 [GitHub Actions](GITHUB_ACTIONS.md)。
+CI workflow 已配置为在 Linux 上运行完整 verify/race 和固定 coverage gate；独立 Web Job 配置了 `npm ci`、Vitest、typecheck、生产构建、静态漂移检查与 Playwright Chromium E2E；平台矩阵、Docker 和安全工作流也已配置。某个 commit 是否获得 exact-head GitHub CI、CodeQL 与其他 Security 终态，必须从 GitHub Actions 按 SHA 实时回读；本文档中的配置说明不能替代远端通过证据。详见 [GitHub Actions](GITHUB_ACTIONS.md)。

@@ -6,7 +6,7 @@ SuperFeishuSearch 是一个确定性的飞书联邦检索内核。提交变更�
 
 ```bash
 git clone https://github.com/BlueSkyXN/Feishu-SuperSearch.git
-cd super-feishu-search
+cd Feishu-SuperSearch
 make verify
 ```
 

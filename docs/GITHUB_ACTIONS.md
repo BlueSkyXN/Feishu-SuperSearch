@@ -83,6 +83,7 @@ GitHub-hosted Linux、macOS、Windows runner 原生运行 `go test ./...` 并构
 Jobs：
 
 ```text
+Security / Gitleaks
 Security / NPM audit
 Security / Govulncheck
 Security / CodeQL
@@ -108,7 +109,7 @@ Tag workflow 首先校验：
 
 - 版本与仓库八处声明一致；
 - checkout commit 与 Tag 指向一致；
-- Tag commit 是 `origin/main` 的 ancestor；
+- Tag commit 等于触发发布时的 `origin/main` head；
 - 完整 Verify、Web、Playwright、coverage、HTTP/Web smoke 全部通过。
 
 随后 `make package-only` 生成 6 个运行包、2 个源码包和 `SHA256SUMS`。`make release-verify` 在发布前检查：
@@ -175,6 +176,7 @@ CI / Platform / linux-native
 CI / Platform / macos-native
 CI / Platform / windows-native
 CI / Docker image
+Security / Gitleaks
 Security / NPM audit
 Security / Govulncheck
 Security / CodeQL
@@ -184,7 +186,7 @@ Security / CodeQL
 
 单维护者仓库不要配置会永久自锁的强制 approval 数量；是否要求 reviewer 是仓库治理决策。启用 merge queue 前必须保留 `merge_group` 触发。
 
-`v*` Tag Ruleset 应限制创建者并禁止更新/删除。Release workflow 的 main ancestry 检查是第二层防线，不能替代 Tag 保护。
+`v*` Tag Ruleset 应限制创建者并禁止更新/删除。Release workflow 的 exact `origin/main` head 检查是第二层防线，不能替代 Tag 保护。
 
 ## 7. 如何核验交付
 
