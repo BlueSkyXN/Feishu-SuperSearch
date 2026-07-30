@@ -714,7 +714,7 @@ SFS_AI_MODEL
 
 正式交付事实以 [Actions](https://github.com/BlueSkyXN/Feishu-SuperSearch/actions) 中具体 commit 的终态和 [Releases](https://github.com/BlueSkyXN/Feishu-SuperSearch/releases) 中实际资产为准。`pending`、`cancelled`、不同 SHA 或本地测试都不能替代 exact-head 成功记录。
 
-源码贡献者需要 Go 1.23+、Node.js 22 和 Chromium。维护者本地入口：
+源码贡献者需要 Go 1.23+、Node.js 22、Python 3、Ruby、ShellCheck 和 Chromium。维护者本地入口：
 
 ```bash
 make verify

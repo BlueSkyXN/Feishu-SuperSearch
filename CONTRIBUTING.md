@@ -15,6 +15,7 @@ make verify
 - Go 1.23 或更高版本；
 - Python 3，用于文档与 JSON 检查；
 - Ruby，用于 GitHub Actions YAML 语法检查；
+- ShellCheck，用于校验 GitHub Actions 的 Bash/sh `run:` block；
 - Docker 仅在验证容器镜像时需要；
 - 真实飞书联调需要独立安装并登录 `lark-cli`，或者提供可用的用户 Access Token。
 
@@ -53,7 +54,7 @@ go vet ./...
 go test ./...
 go test -race ./...
 文档本地链接与 JSON 检查
-GitHub Actions YAML 语法检查
+GitHub Actions YAML 与 ShellCheck 检查
 Shell/Python/Ruby 自动化脚本语法检查
 Mock 端到端 smoke test
 ```
