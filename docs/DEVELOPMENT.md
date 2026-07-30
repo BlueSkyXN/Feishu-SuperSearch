@@ -200,6 +200,17 @@ make docs-check
 make workflow-check
 ```
 
+`make workflow-check` 需要本机提供 `ruby`、`shellcheck` 和 Go。它先由
+`scripts/check-workflows.rb` 校验 YAML 结构，并把所有 Bash/sh `run:` block
+逐个交给 ShellCheck；缺少 binary、输出异常、非零结果或单个 block 超过默认
+10 秒都会让门禁失败。之后才运行固定的 actionlint v1.7.7。
+
+actionlint 这一步显式关闭其内置 ShellCheck 集成，是因为 v1.7.7 在 Darwin
+上会先向尚未启动 reader 的 stdin pipe 写入较大的 `run:` block，从而死锁；
+Shell lint 已在前一步以同一条跨平台路径完成，并未取消。诊断卡住的
+ShellCheck 时可临时缩短 `WORKFLOW_SHELLCHECK_TIMEOUT`，但正式验证不应借此
+跳过检查。
+
 公共模型变化还要人工核对：
 
 - `api/openapi.yaml`；

@@ -27,12 +27,9 @@ type CLIError struct {
 
 func ParseEnvelope(result CommandResult) (Envelope, any, error) {
 	var env Envelope
-	payload := bytes.TrimSpace(result.Stdout)
-	if result.ExitCode != 0 && len(bytes.TrimSpace(result.Stderr)) > 0 {
-		payload = bytes.TrimSpace(result.Stderr)
-	}
-	if len(payload) == 0 {
-		return env, nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: fmt.Sprintf("lark-cli produced no JSON (exit=%d)", result.ExitCode)}
+	payload, err := selectJSONPayload(result)
+	if err != nil {
+		return env, nil, err
 	}
 	// The official CLI envelope always has an explicit `ok` field. Raw
 	// OpenAPI responses can also contain `data`, so data presence alone must
@@ -47,6 +44,9 @@ func ParseEnvelope(result CommandResult) (Envelope, any, error) {
 		}
 		if !env.OK {
 			return env, nil, mapCLIError(env.Error, result.ExitCode)
+		}
+		if result.ExitCode != 0 {
+			return env, nil, &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "lark-cli returned a success envelope with a non-zero exit code", Details: map[string]any{"exit_code": result.ExitCode}}
 		}
 		var data any
 		if len(env.Data) > 0 {
@@ -65,6 +65,122 @@ func ParseEnvelope(result CommandResult) (Envelope, any, error) {
 		return env, nil, &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "lark-cli command failed", Details: map[string]any{"exit_code": result.ExitCode}}
 	}
 	return Envelope{OK: true}, raw, nil
+}
+
+type jsonPayloadCandidate struct {
+	payload  []byte
+	stream   int
+	envelope bool
+	clean    bool
+}
+
+func selectJSONPayload(result CommandResult) ([]byte, error) {
+	streams := [][]byte{result.Stdout, result.Stderr}
+	candidates := make([]jsonPayloadCandidate, 0, 2)
+	malformedStructuredOutput := false
+	for stream, output := range streams {
+		found, malformed := scanJSONPayloads(output, stream)
+		candidates = append(candidates, found...)
+		malformedStructuredOutput = malformedStructuredOutput || malformed
+	}
+
+	primaryStream := 0
+	if result.ExitCode != 0 && len(bytes.TrimSpace(result.Stderr)) > 0 {
+		primaryStream = 1
+	}
+	primary := bytes.TrimSpace(streams[primaryStream])
+	if len(candidates) == 0 {
+		if len(primary) == 0 {
+			return nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: fmt.Sprintf("lark-cli produced no JSON (exit=%d)", result.ExitCode)}
+		}
+		var raw any
+		if err := json.Unmarshal(primary, &raw); err != nil {
+			return nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: "invalid JSON from lark-cli: " + err.Error()}
+		}
+		return nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: "lark-cli produced no supported JSON payload"}
+	}
+	if malformedStructuredOutput || len(candidates) != 1 {
+		return nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: "lark-cli produced ambiguous JSON output"}
+	}
+
+	candidate := candidates[0]
+	// Mixed diagnostic output is only safe to ignore when a typed CLI
+	// envelope anchors the result. Raw OpenAPI compatibility stays whole-stream.
+	if !candidate.envelope && (!candidate.clean || candidate.stream != primaryStream) {
+		return nil, &kernel.ErrorDetail{Type: kernel.ErrParse, Message: "lark-cli mixed diagnostics with an untyped JSON payload"}
+	}
+	return candidate.payload, nil
+}
+
+func scanJSONPayloads(output []byte, stream int) ([]jsonPayloadCandidate, bool) {
+	candidates := make([]jsonPayloadCandidate, 0, 1)
+	malformed := false
+	for cursor := 0; cursor < len(output); {
+		lineEnd := len(output)
+		if offset := bytes.IndexByte(output[cursor:], '\n'); offset >= 0 {
+			lineEnd = cursor + offset
+		}
+		line := output[cursor:lineEnd]
+		trimmedLine := bytes.TrimSpace(line)
+		if len(trimmedLine) == 0 || (!json.Valid(trimmedLine) && !looksLikeJSONContainer(trimmedLine)) {
+			cursor = nextLineOffset(lineEnd, len(output))
+			continue
+		}
+
+		start := cursor + bytes.Index(line, trimmedLine)
+		decoder := json.NewDecoder(bytes.NewReader(output[start:]))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			malformed = true
+			cursor = nextLineOffset(lineEnd, len(output))
+			continue
+		}
+		end := start + int(decoder.InputOffset())
+		valueLineEnd := len(output)
+		if offset := bytes.IndexByte(output[end:], '\n'); offset >= 0 {
+			valueLineEnd = end + offset
+		}
+		if len(bytes.TrimSpace(output[end:valueLineEnd])) != 0 {
+			malformed = true
+			cursor = nextLineOffset(valueLineEnd, len(output))
+			continue
+		}
+
+		payload := append([]byte(nil), bytes.TrimSpace(output[start:end])...)
+		var marker struct {
+			OK *bool `json:"ok"`
+		}
+		_ = json.Unmarshal(payload, &marker)
+		candidates = append(candidates, jsonPayloadCandidate{
+			payload:  payload,
+			stream:   stream,
+			envelope: marker.OK != nil,
+			clean:    bytes.Equal(bytes.TrimSpace(output), payload),
+		})
+		cursor = nextLineOffset(valueLineEnd, len(output))
+	}
+	return candidates, malformed
+}
+
+func looksLikeJSONContainer(line []byte) bool {
+	if len(line) == 0 || (line[0] != '{' && line[0] != '[') {
+		return false
+	}
+	remaining := bytes.TrimSpace(line[1:])
+	if len(remaining) == 0 {
+		return true
+	}
+	if line[0] == '{' {
+		return remaining[0] == '"' || remaining[0] == '}'
+	}
+	return bytes.ContainsAny(remaining[:1], `[{"-0123456789tfn]`)
+}
+
+func nextLineOffset(lineEnd, outputLen int) int {
+	if lineEnd < outputLen {
+		return lineEnd + 1
+	}
+	return outputLen
 }
 
 func mapCLIError(e *CLIError, exit int) *kernel.ErrorDetail {

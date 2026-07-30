@@ -28,6 +28,13 @@ gitleaks git --staged --redact --no-banner --no-color .
 
 `make verify` 还包含文档、OpenAPI YAML 结构与重复键、工作流、运行时依赖许可证闭合集合、脚本语法和 Mock smoke。Coverage 与 Web 分别保留独立 target，便于本地按需运行；CI 会把它们全部作为必需检查执行。
 
+工作流门禁要求 `shellcheck` 可执行文件存在。`scripts/check-workflows.rb` 会对
+当前所有 Bash/sh `run:` block 独立执行 ShellCheck，并对每个进程设置默认
+10 秒硬超时；缺 binary、超时、异常输出、ShellCheck finding 或其他非零退出
+都会失败。随后 actionlint v1.7.7 仅负责其余 workflow 规则。其内置
+ShellCheck 集成被显式关闭，是为了规避该版本在 Darwin 上写入大 stdin
+block 时的 pipe 死锁，不代表 shell lint 被降级或跳过。
+
 发布候选还必须在干净 Git checkout 中执行：
 
 ```bash

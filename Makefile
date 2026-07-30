@@ -47,7 +47,8 @@ api-check:
 workflow-check:
 	ruby scripts/check-workflows.rb
 	# v1.7.8+ requires Go 1.24; v1.7.7 is the latest release compatible with go.mod's Go 1.23 baseline.
-	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -config-file .github/actionlint.yaml .github/workflows/*.yml
+	# ShellCheck runs separately above because actionlint v1.7.7 can deadlock while feeding large run blocks on Darwin.
+	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck '' -config-file .github/actionlint.yaml .github/workflows/*.yml
 
 license-check:
 	python3 scripts/check-third-party-licenses.py
@@ -57,6 +58,7 @@ scripts-check:
 	python3 -c 'import ast, pathlib; [ast.parse(p.read_text(encoding="utf-8"), filename=str(p)) for p in pathlib.Path("scripts").glob("*.py")]'
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 	@for script in scripts/*.rb; do ruby -c "$$script" >/dev/null; done
+	ruby scripts/test_check_workflows.rb
 
 build:
 	mkdir -p bin
