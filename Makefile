@@ -46,7 +46,7 @@ api-check:
 
 workflow-check:
 	ruby scripts/check-workflows.rb
-	# v1.7.8+ requires Go 1.24; v1.7.7 is the latest release compatible with go.mod's Go 1.23 baseline.
+	# Keep actionlint pinned independently from the repository's Go baseline.
 	# ShellCheck runs separately above because actionlint v1.7.7 can deadlock while feeding large run blocks on Darwin.
 	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck '' -config-file .github/actionlint.yaml .github/workflows/*.yml
 

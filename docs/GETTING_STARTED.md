@@ -154,7 +154,7 @@ MCP 使用 stdio。宿主应把 `sfs` 作为子进程启动，不要把诊断文
 
 ## 9. 源码贡献者
 
-只有开发和维护发布流程时才需要本地工具链：Go 1.23+、Node.js 22 和 Playwright Chromium。
+只有开发和维护发布流程时才需要本地工具链：Go 1.25+、Node.js 22.22.2+（或 24.15.0+/26+）和 Playwright Chromium。
 
 ```bash
 git clone https://github.com/BlueSkyXN/Feishu-SuperSearch.git
