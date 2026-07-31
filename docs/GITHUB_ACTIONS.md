@@ -38,7 +38,7 @@ go test -race ./...
 整仓 coverage >= 65%
 核心包 coverage >= 75%
 文档链接、JSON、OpenAPI、Workflow、Shell/Python/Ruby 检查
-actionlint v1.7.7（保持与项目 Go 1.23 基线兼容）
+actionlint v1.7.7（独立固定版本）
 Mock CLI smoke
 ```
 
@@ -47,7 +47,7 @@ Coverage artifact 名包含 `run_id`、`run_attempt` 和 SHA，避免 rerun 与�
 ### `CI / Web`
 
 ```text
-Node.js 22
+Node.js 22.23.1
 npm ci
 Vitest
 TypeScript typecheck

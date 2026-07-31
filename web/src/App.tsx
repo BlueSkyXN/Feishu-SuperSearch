@@ -53,7 +53,7 @@ export default function App() {
   const [progress, setProgress] = useState<WorkflowProgressEvent>();
   const [pendingPreviewID, setPendingPreviewID] = useState<string>();
   const [preview, setPreview] = useState<{ candidate: Candidate; artifact?: Artifact; error?: string }>();
-  const requestController = useRef<AbortController>();
+  const requestController = useRef<AbortController | undefined>(undefined);
   const previewRef = useRef<HTMLDivElement>(null);
 
   const searchableSources = useMemo(() => {

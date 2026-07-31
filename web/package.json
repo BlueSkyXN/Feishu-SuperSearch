@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.3",
   "type": "module",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
@@ -16,21 +19,21 @@
     "verify": "npm run test && npm run build && npm run check:static"
   },
   "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "6.6.3",
-    "@testing-library/react": "16.3.0",
+    "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
-    "@types/react": "18.3.20",
-    "@types/react-dom": "18.3.6",
-    "@vitejs/plugin-react": "4.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
     "axe-core": "4.10.3",
-    "jsdom": "26.1.0",
+    "jsdom": "30.0.1",
     "typescript": "5.8.3",
-    "vite": "^6.4.3",
-    "vitest": "^3.2.7"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
   }
 }
