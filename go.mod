@@ -3,7 +3,7 @@ module github.com/BlueSkyXN/Feishu-SuperSearch
 go 1.25.0
 
 require (
-	github.com/larksuite/oapi-sdk-go/v3 v3.9.9
+	github.com/larksuite/oapi-sdk-go/v3 v3.11.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	modernc.org/sqlite v1.55.0
 )
