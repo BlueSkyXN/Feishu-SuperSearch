@@ -537,6 +537,10 @@ func (p *Provider) parseArtifact(r kernel.ProviderFetchRequest, data any, genera
 	if text := strings.TrimSpace(content); text != "" {
 		a.Chunks = []kernel.ContentChunk{{ID: "content", Kind: "text", Text: text}}
 		a.Projection |= kernel.ProjectionContent
+	} else if p.spec.Descriptor.Source == kernel.SourceMessages && findString(m, []string{"msg_type"}) != "" {
+		// The message body was read but has no text (for example a card that
+		// holds only images). Its content is materialized and empty.
+		a.Projection |= kernel.ProjectionContent
 	}
 	if p.spec.Descriptor.FetchableProjection.Has(kernel.ProjectionSummary) {
 		if sum := extractSummary(m); sum != nil {
@@ -951,7 +955,8 @@ func normalizeContentText(value string) string {
 				walk(child)
 			}
 		case map[string]any:
-			for _, key := range []string{"title", "text", "content"} {
+			// "elements" holds the body of interactive card messages.
+			for _, key := range []string{"title", "text", "content", "elements"} {
 				if child, ok := item[key]; ok {
 					walk(child)
 				}

@@ -435,7 +435,7 @@ func (*executionKernel) Session(context.Context, string, kernel.Identity) (kerne
 }
 
 func planCandidate(id string, kind kernel.ObjectKind) kernel.Candidate {
-	return kernel.Candidate{Ref: kernel.ObjectRef{NativeID: id, CanonicalID: "canonical:" + id, Kind: kind}, Source: kernel.SourceDocs, Kind: kind, NativeRank: 1, Title: id}
+	return kernel.Candidate{Ref: kernel.ObjectRef{NativeID: id, CanonicalID: "canonical:" + id, Kind: kind}, Source: kernel.SourceDocs, Kind: kind, NativeRank: 1, Title: id, AvailableProjection: kernel.ProjectionSummary | kernel.ProjectionStructure | kernel.ProjectionContent | kernel.ProjectionContext | kernel.ProjectionRelations}
 }
 
 func planArtifact(ref kernel.ObjectRef) kernel.Artifact {
@@ -443,3 +443,28 @@ func planArtifact(ref kernel.ObjectRef) kernel.Artifact {
 }
 
 var _ kernel.Kernel = (*executionKernel)(nil)
+
+// A Base found by docs search declares nothing to read; map_fetch skips it and
+// reads the next candidate instead, and asks each candidate only for the
+// wanted projections it declares available.
+func TestMapFetchSkipsUnreadableCandidatesAndFillsTopK(t *testing.T) {
+	base := planCandidate("base", kernel.KindBase)
+	base.AvailableProjection = 0
+	doc := planCandidate("doc", kernel.KindDocument)
+	doc.AvailableProjection = kernel.ProjectionContent
+	msg := planCandidate("msg", kernel.KindMessage)
+	extra := planCandidate("extra", kernel.KindDocument)
+	var captured kernel.FetchBatchRequest
+	k := &executionKernel{fetchFn: func(_ context.Context, request kernel.FetchBatchRequest) (kernel.ArtifactBatch, error) {
+		captured = request
+		return kernel.ArtifactBatch{SessionID: "sid"}, nil
+	}}
+	deps := map[string]kernel.NodeResult{"search": {Candidates: []kernel.Candidate{base, doc, msg, extra}}}
+	New(k, 1).executeNode(context.Background(), kernel.RetrievalPlan{}, kernel.PlanNode{ID: "map", Op: kernel.PlanMapFetch, Request: json.RawMessage(`{"top_k":2}`)}, deps, "sid")
+	if len(captured.Items) != 2 || captured.Items[0].Ref.NativeID != "doc" || captured.Items[1].Ref.NativeID != "msg" {
+		t.Fatalf("items=%+v", captured.Items)
+	}
+	if captured.Items[0].Projection != kernel.ProjectionContent {
+		t.Fatalf("doc projection=%v, want only the available content", captured.Items[0].Projection.Strings())
+	}
+}

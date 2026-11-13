@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 )
 
 // The item has no top-level ID or title key. The document token sits in
@@ -76,5 +78,37 @@ func TestFindTimeReadsZonelessTimesAsLocal(t *testing.T) {
 		if got == nil || !got.Equal(want) {
 			t.Fatalf("findTime(%q)=%v want %v", raw, got, want)
 		}
+	}
+}
+
+// Message details measured with lark-cli 1.0.100 include interactive cards
+// whose elements are only images. Reading one must succeed with empty content
+// instead of failing as version_incompatible.
+func TestMessageFetchAcceptsCardWithoutText(t *testing.T) {
+	spec := specFor(t, "messages")
+	raw := `{"ok":true,"identity":"user","data":{"items":[{"message_id":"om_sample","chat_id":"oc_sample","msg_type":"interactive","body":{"content":"{\"title\":null,\"elements\":[[{\"tag\":\"img\",\"image_key\":\"img_sample\"}]]}"}}]}}`
+	_, data, err := ParseEnvelope(CommandResult{ExitCode: 0, Stdout: []byte(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := kernel.ObjectRef{Kind: kernel.KindMessage, NativeID: "om_sample", Source: kernel.SourceMessages}
+	projection := kernel.ProjectionContent | kernel.ProjectionContext | kernel.ProjectionRelations
+	artifact, err := (&Provider{spec: spec}).parseArtifact(kernel.ProviderFetchRequest{Ref: ref, Projection: projection}, data, "")
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if !artifact.Projection.Has(projection) || len(artifact.Chunks) != 0 {
+		t.Fatalf("projection=%v chunks=%d", artifact.Projection.Strings(), len(artifact.Chunks))
+	}
+
+	// A card with a title still yields its text.
+	withText := `{"ok":true,"data":{"items":[{"message_id":"om_text","msg_type":"interactive","body":{"content":"{\"title\":\"项目周报\",\"elements\":[[{\"tag\":\"text\",\"text\":\"进度正常\"}]]}"}}]}}`
+	_, data, err = ParseEnvelope(CommandResult{ExitCode: 0, Stdout: []byte(withText)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err = (&Provider{spec: spec}).parseArtifact(kernel.ProviderFetchRequest{Ref: ref, Projection: projection}, data, "")
+	if err != nil || len(artifact.Chunks) != 1 || artifact.Chunks[0].Text != "项目周报\n进度正常" {
+		t.Fatalf("artifact=%+v err=%v", artifact.Chunks, err)
 	}
 }
