@@ -3,6 +3,7 @@ package larkcli
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // The item has no top-level ID or title key. The document token sits in
@@ -58,4 +59,22 @@ func specFor(t *testing.T, source string) SourceSpec {
 	}
 	t.Fatalf("no spec for %s", source)
 	return SourceSpec{}
+}
+
+// Zone-less lark-cli times are local: parsed as UTC, the newest message
+// create_time measured with lark-cli 1.0.100 lay 8 hours in the future on a
+// UTC+8 machine.
+func TestFindTimeReadsZonelessTimesAsLocal(t *testing.T) {
+	cases := map[string]time.Time{
+		"2026-07-30 10:05":     time.Date(2026, 7, 30, 10, 5, 0, 0, time.Local),
+		"2026-07-30 10:05:09":  time.Date(2026, 7, 30, 10, 5, 9, 0, time.Local),
+		"2026-07-30T10:05:09Z": time.Date(2026, 7, 30, 10, 5, 9, 0, time.UTC),
+		"1785400000":           time.Unix(1785400000, 0),
+	}
+	for raw, want := range cases {
+		got := findTime(map[string]any{"create_time": raw}, []string{"create_time"})
+		if got == nil || !got.Equal(want) {
+			t.Fatalf("findTime(%q)=%v want %v", raw, got, want)
+		}
+	}
 }

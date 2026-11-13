@@ -61,7 +61,7 @@ sfs --config ~/.config/sfs/config.json providers
 {
   "runtime": {
     "global_concurrency": 6,
-    "provider_timeout": "4s",
+    "provider_timeout": "8s",
     "listen": "127.0.0.1:3765"
   }
 }

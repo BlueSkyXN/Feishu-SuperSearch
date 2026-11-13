@@ -116,7 +116,7 @@ SQLite 工作集可能包含：
 
 ```text
 global_concurrency = 6
-provider_timeout = 4s
+provider_timeout = 8s
 balanced deadline = 8s
 max_calls = 24
 max_bytes = 32 MiB

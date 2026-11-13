@@ -41,7 +41,7 @@ func New(registry *provider.Registry, store session.Store, cfg Config) *Engine {
 		cfg.GlobalConcurrency = 6
 	}
 	if cfg.ProviderTimeout <= 0 {
-		cfg.ProviderTimeout = 4 * time.Second
+		cfg.ProviderTimeout = 8 * time.Second
 	}
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = 45 * time.Minute

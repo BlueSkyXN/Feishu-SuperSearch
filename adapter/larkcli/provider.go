@@ -752,7 +752,7 @@ func findString(m map[string]any, keys []string) string {
 }
 
 func stringField(m map[string]any, key string) (string, bool) {
-	v, ok := m[key]
+	v, ok := lookupPath(m, key)
 	if !ok {
 		return "", false
 	}
@@ -771,6 +771,27 @@ func stringField(m map[string]any, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// lookupPath resolves key in m. A dotted key such as "start.date_time" names
+// a path through nested objects; spec field lists use it where a plain key
+// would match the wrong sibling.
+func lookupPath(m map[string]any, key string) (any, bool) {
+	if !strings.Contains(key, ".") {
+		v, ok := m[key]
+		return v, ok
+	}
+	var current any = m
+	for _, part := range strings.Split(key, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if current, ok = object[part]; !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 // childObjects returns the objects directly below level: object values and
@@ -814,8 +835,12 @@ func findBool(m map[string]any, keys []string) bool {
 	return false
 }
 
+// highlightTagRE matches the search highlight markup lark-cli returns in
+// titles and summaries (<h>, <hb>, <b>, <em>).
+var highlightTagRE = regexp.MustCompile(`</?(?:h|hb|b|em)>`)
+
 func cleanText(s string) string {
-	s = strings.TrimSpace(s)
+	s = strings.TrimSpace(highlightTagRE.ReplaceAllString(s, ""))
 	if s == "" {
 		return s
 	}
@@ -846,8 +871,17 @@ func findTime(m map[string]any, keys []string) *time.Time {
 		t := time.Unix(n, 0).UTC()
 		return &t
 	}
-	for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339, time.RFC3339Nano} {
 		if t, err := time.Parse(layout, raw); err == nil {
+			return &t
+		}
+	}
+	// lark-cli prints some times without a zone (messages "2006-01-02 15:04",
+	// tasks "2006-01-02 15:04:05") in the local time zone of the machine it
+	// runs on, which is the machine sfs runs on.
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			t = t.UTC()
 			return &t
 		}
 	}

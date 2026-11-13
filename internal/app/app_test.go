@@ -193,7 +193,7 @@ func TestLoadConfigAIEnvironmentDoesNotStoreSecret(t *testing.T) {
 func TestNormalizeAndConfigAccessors(t *testing.T) {
 	cfg := Config{Version: 2, Storage: StorageConfig{Type: " FILE "}, Runtime: RuntimeConfig{SessionDir: "~/sessions"}, Replay: ReplayConfig{Dir: "~/replay"}}
 	normalize(&cfg)
-	if cfg.Backend != "auto" || cfg.Runtime.GlobalConcurrency != 6 || cfg.Runtime.ProviderTimeout != "4s" || cfg.Runtime.Listen == "" {
+	if cfg.Backend != "auto" || cfg.Runtime.GlobalConcurrency != 6 || cfg.Runtime.ProviderTimeout != "8s" || cfg.Runtime.Listen == "" {
 		t.Fatalf("runtime defaults=%+v", cfg.Runtime)
 	}
 	if cfg.Storage.Type != "file" || cfg.Storage.TTL != "45m" || !strings.HasSuffix(cfg.Storage.Path, "sessions") {
@@ -227,7 +227,7 @@ func TestNormalizeAndConfigAccessors(t *testing.T) {
 	cfg.OpenAPI.Timeout = "bad"
 	cfg.Planner.Timeout = "bad"
 	cfg.AI.Timeout = "0s"
-	if cfg.ProviderTimeout() != 4*time.Second || cfg.SessionTTL() != 45*time.Minute || cfg.LarkTimeout() != 8*time.Second || cfg.OpenAPITimeout() != 10*time.Second || cfg.PlannerTimeout() != 30*time.Second || cfg.AITimeout() != 45*time.Second {
+	if cfg.ProviderTimeout() != 8*time.Second || cfg.SessionTTL() != 45*time.Minute || cfg.LarkTimeout() != 8*time.Second || cfg.OpenAPITimeout() != 10*time.Second || cfg.PlannerTimeout() != 30*time.Second || cfg.AITimeout() != 45*time.Second {
 		t.Fatal("duration fallbacks mismatch")
 	}
 	if cfg.AIFeatureTimeout(AIFeatureConfig{Timeout: "7s"}) != 7*time.Second || cfg.AIFeatureTimeout(AIFeatureConfig{Timeout: "bad"}) != 45*time.Second {

@@ -126,7 +126,7 @@ func DefaultConfig() Config {
 	return Config{
 		Version:   2,
 		Backend:   "auto",
-		Runtime:   RuntimeConfig{GlobalConcurrency: 6, ProviderTimeout: "4s", Listen: "127.0.0.1:3765"},
+		Runtime:   RuntimeConfig{GlobalConcurrency: 6, ProviderTimeout: "8s", Listen: "127.0.0.1:3765"},
 		Storage:   StorageConfig{Type: "sqlite", Path: filepath.Join(home, ".sfs", "sfs.db"), TTL: "45m"},
 		LarkCLI:   LarkCLIConfig{Executable: "lark-cli", Timeout: "8s", MaxStdoutBytes: 16 << 20, MaxStderrBytes: 4 << 20},
 		OpenAPI:   OpenAPIConfig{BaseURL: "https://open.feishu.cn", TokenEnv: "FEISHU_USER_ACCESS_TOKEN", Timeout: "10s", MaxResponseBytes: 16 << 20},
@@ -280,7 +280,7 @@ func normalize(c *Config) {
 		c.Runtime.GlobalConcurrency = 6
 	}
 	if c.Runtime.ProviderTimeout == "" {
-		c.Runtime.ProviderTimeout = "4s"
+		c.Runtime.ProviderTimeout = "8s"
 	}
 	if c.Runtime.Listen == "" {
 		c.Runtime.Listen = "127.0.0.1:3765"
@@ -416,10 +416,17 @@ func expandHome(path string) string {
 	}
 	return path
 }
+
+// defaultProviderTimeout bounds one provider call. lark-cli 1.0.100 searches
+// were measured at up to 3.6 s and sometimes beyond 4 s for messages and tasks,
+// so the earlier 4 s default dropped those sources. Searches stay bounded by
+// the profile deadline (8 s for balanced).
+const defaultProviderTimeout = 8 * time.Second
+
 func (c Config) ProviderTimeout() time.Duration {
 	d, e := time.ParseDuration(c.Runtime.ProviderTimeout)
 	if e != nil {
-		return 4 * time.Second
+		return defaultProviderTimeout
 	}
 	return d
 }
