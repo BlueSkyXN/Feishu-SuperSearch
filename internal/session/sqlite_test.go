@@ -540,3 +540,91 @@ func newSQLiteTestStore(t *testing.T, ttl time.Duration) (*SQLiteStore, string) 
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
 }
+
+// Two operations on one session interleave the way parallel plan nodes do:
+// both Get the session before either saves. The second Save must not drop the
+// first operation's change.
+func TestSQLiteStoreInterleavedReadModifyWriteKeepsBothUpdates(t *testing.T) {
+	ctx := context.Background()
+	store, path := newSQLiteTestStore(t, time.Hour)
+	record, err := store.Create(ctx, "rmw-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []struct {
+		record *Record
+		key    string
+	}{{first, "from-first"}, {second, "from-second"}} {
+		key := op.key
+		op.record.WithLock(func(r *Record) {
+			r.Candidates[key] = kernel.Candidate{Ref: kernel.ObjectRef{CanonicalID: key}, Title: key}
+		})
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	persisted, err := reopened.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(persisted.Snapshot(false).Candidates); got != 2 {
+		t.Fatalf("persisted candidate count = %d, want 2", got)
+	}
+}
+
+// Two stores on one file stand in for two processes. A save by one must be
+// visible to the other's next Get instead of being hidden by its in-process
+// instance.
+func TestSQLiteStoreReloadsSessionSavedByAnotherProcess(t *testing.T) {
+	ctx := context.Background()
+	first, path := newSQLiteTestStore(t, time.Hour)
+	second, err := NewSQLiteStore(path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	record, err := first.Create(ctx, "two-process-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := second.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.WithLock(func(r *Record) {
+		r.Candidates["from-second"] = kernel.Candidate{Ref: kernel.ObjectRef{CanonicalID: "from-second"}, Title: "from-second"}
+	})
+	if err := second.Save(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	again, err := first.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(again.Snapshot(false).Candidates); got != 1 {
+		t.Fatalf("candidate count after other process saved = %d, want 1", got)
+	}
+	same, err := first.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same != again {
+		t.Fatal("unchanged session should return the same in-process instance")
+	}
+}

@@ -85,6 +85,8 @@ func ExtractEvidence(query string, pack ArtifactPack) EvidencePack {
 		seen[e.ID] = true
 		out.Evidence = append(out.Evidence, e)
 	}
+	terms := queryTerms(query)
+	chunkBytes := 0
 	for _, a := range pack.Artifacts {
 		if a.Summary != nil && strings.TrimSpace(a.Summary.Text) != "" {
 			appendEvidence(Evidence{Kind: "native_summary", ClaimType: "summary", Text: a.Summary.Text, SourceRef: a.Ref, Projection: kernel.ProjectionSummary, SourceSpan: SourceSpan{ChunkID: "native_summary"}, Confidence: .95, URL: a.Ref.URL})
@@ -92,8 +94,22 @@ func ExtractEvidence(query string, pack ArtifactPack) EvidencePack {
 		for i, todo := range summaryTodos(a) {
 			appendEvidence(Evidence{Kind: "todo", ClaimType: "action_item", Text: todo, SourceRef: a.Ref, Projection: kernel.ProjectionSummary, SourceSpan: SourceSpan{ChunkID: fmt.Sprintf("todo_%d", i+1)}, Confidence: .9, URL: a.Ref.URL})
 		}
+		// Each chunk contributes its passages that best match the query. The
+		// quote is the exact passage text; the span gives its rune offsets,
+		// shifted by the chunk's own start offset.
 		for _, c := range a.Chunks {
-			appendEvidence(Evidence{Kind: c.Kind, ClaimType: claimTypeForChunk(c.Kind), Text: c.Text, SourceRef: a.Ref, Projection: a.Projection, SourceSpan: SourceSpan{ChunkID: c.ID, Start: c.Start, End: c.End}, Timestamp: c.Timestamp, Confidence: .85, URL: a.Ref.URL})
+			r := []rune(c.Text)
+			for _, p := range selectPassages(r, splitPassages(r), terms) {
+				text := string(r[p.start:p.end])
+				if chunkBytes+len(text) > maxChunkEvidenceBytes {
+					return out
+				}
+				before := len(out.Evidence)
+				appendEvidence(Evidence{Kind: c.Kind, ClaimType: claimTypeForChunk(c.Kind), Text: text, SourceRef: a.Ref, Projection: a.Projection, SourceSpan: SourceSpan{ChunkID: c.ID, Start: c.Start + p.start, End: c.Start + p.end}, Timestamp: c.Timestamp, Confidence: .85, URL: a.Ref.URL})
+				if len(out.Evidence) > before {
+					chunkBytes += len(text)
+				}
+			}
 		}
 	}
 	return out

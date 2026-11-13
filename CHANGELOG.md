@@ -2,13 +2,45 @@
 
 ## Unreleased
 
+### Changed
+
+- Session 改为只增的检索工作区：后一次 Search 或 Continue 不再清掉之前写入的候选，同一计划中的多个 search 节点可以共用 Session，`map_fetch` 不再以 `fetch ref is not present in the selected session` 拒绝前一个节点的对象。请求、来源游标和来源状态仍属于最近一次 Search
+- `sfs serve`、`sfs mcp` 启动时显式给出的 `--profile`、`--as` 会限定请求可用的身份；请求要求其他值时返回 `identity_required`（`subtype=identity_pinned`）。未显式给出的字段保持按请求选择
+- Evidence Pack 的正文证据从"一个 chunk 一条、引用全文"改为按段落切分：每个 chunk 保留与查询词重合最多的 4 段（每段不超过 600 字），`quote` 与 `source_span` 指向段落；正文证据合计不超过 512 KiB。此前大文档会让 Ask 请求超过 4 MiB 而退回确定性摘要，引用也只能指向整篇文档
+- `runtime.provider_timeout` 默认值从 4 秒改为 8 秒。实测 lark-cli 1.0.100 的 messages、tasks 搜索耗时 2.9–3.6 秒且时常超过 4 秒，旧默认值会丢掉这两个来源；搜索总时长仍受档位截止时间约束（balanced 为 8 秒）
+- research 与 ask 的默认预算统一放在 research 服务中（15 秒、36 次调用、每来源 2 页、读取数等于 `fetch_top_k`）；此前只有 CLI 使用这组值，HTTP 与 MCP 落到 8 秒、24 次调用
+
+- 启动时复用 SQLite 中 1 小时内、且只含兼容性结论的能力探测结果，lark-cli 可执行文件变化后重新探测；真实 lark-cli 1.0.100 下 `sfs sessions list` 从约 0.9 秒降到约 0.01 秒（首次启动仍需探测）。能力快照新增 `observed_at` 字段
+
 ### Fixed
+
+- `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段
+- 翻页结果的来源内名次改由 Kernel 统一加页偏移，第 2 页不再与第 1 页同名次、同分并穿插排序；Provider 契约改为返回页内名次，mock Provider 同步调整
+- MCP `tools/call` 接受协议保留的 `_meta` 字段，不再以 `-32602` 拒绝带 progressToken 等元数据的请求
+- SQLite Session 存储在同一进程内共享一个 Session 实例，并串行化同一 Session 的读写；计划中并行节点写同一 Session 时不再互相覆盖。其他进程保存过的 Session 会在下次读取时重新加载
+- MCP `tools/call` 改为并发执行（最多 4 个），长时间的 research 不再阻塞后续请求；`notifications/cancelled` 与 `$/cancelRequest` 会取消对应调用，被取消的调用不再返回响应。此前取消通知不起作用，调用要跑到预算截止时间才结束
+- 按 lark-cli 1.0.100 的实测输出结构补齐字段：docs 标题与摘要取 `title_highlighted`、`summary_highlighted`，ID、URL、时间取 `result_meta`；minutes、meetings 标题取 `display_info`，摘要与链接取 `meta_data`；people 标题取 `localized_name`；mail 时间取 `date`；calendar 时间取 `start.date_time`。此前这些来源的标题在真实搜索中全部为空。字段声明支持点号路径，并去掉 `<h>`、`<hb>`、`<b>`、`<em>` 高亮标签
+- 读取卡片消息（`interactive`）时提取 `elements` 中的正文；只含图片的卡片按"正文已读取、内容为空"返回，不再以 `version_incompatible` 失败
+- `map_fetch` 跳过没有可读取 Projection 的候选（如 docs 搜索命中的多维表格）并由后续候选补位，且只请求候选声明可读取的 Projection；与 research 的 rerank 补读规则一致。此前这类候选会让读取节点和整个 research 变成 `partial`
+- Web 开发与测试依赖按 `npm audit fix` 升级：vite 8.2.0 → 8.3.8、undici 8.9.0 → 8.12.4，修复 2026-07 之后公布的 4 个 high、2 个 moderate 通告（`npm audit` 门禁自 2026-10 起在 `main` 的定时任务中失败）；`package.json` 未变，嵌入的前端产物随 vite 版本重新生成
+- lark-cli calendar 搜索结果可以读取：日程条目缺少 `calendar_id` 时使用响应中页级的 `calendar_id`，读取命令先解析 `calendar_id/event_id` 复合 ID；此前真实搜索得到的日程都因缺少 `calendar_id` 读取失败
+- 单聊消息（无 `chat_name`）以 `sender.name` 作标题，与 direct OpenAPI 适配器一致
+- docs 读取不再把文档自身的 `document_id`（wiki 节点背后的 docx）当成 `message.links_to_document` 关系
+- 来源第一页成功、后续翻页失败时，来源状态记为 `partial` 并保留错误，统计中不再算作失败来源；此前会显示为 `deadline_exceeded` 等失败状态，尽管已返回结果
+- lark-cli 输出的无时区时间（messages `2006-01-02 15:04`、tasks `2006-01-02 15:04:05`）按本机时区解析；此前 messages 时间无法解析，tasks 时间按 UTC 解析
+- lark-cli 字段抽取在顶层找不到字段时逐层查找，同一层按字段优先级、同级对象按 key 排序，结果不再随 map 遍历顺序变化
 
 - lark-cli 输出解析现在只在 stdout/stderr 合计存在唯一、行边界完整且带显式 `ok` 的 envelope 时容忍诊断文本；多 JSON、失败流冲突、混合 raw JSON 与非零退出成功 envelope 继续 fail closed
 - 将 GitHub Actions `run:` block 的 ShellCheck 改为带硬超时的独立门禁，再运行关闭内置 ShellCheck 的 actionlint v1.7.7，避免该版本在 Darwin 上向未启动 reader 的 stdin pipe 写入较大脚本时死锁
 
+### Documentation
+
+- README 的真实只读验证记录更新为 2026-11-13 在 lark-cli 1.0.100 上的结果，第 16 节改为引用该记录
+
 ### Verification
 
+- 增加 lark-cli 1.0.100 搜索结构 fixture（真实 key 结构、虚构取值），逐字段断言 ID、标题、摘要、URL 与时间
+- 增加跨页名次、启动身份默认值（MCP、HTTP）、MCP `_meta`、SQLite 交错读写与跨进程重新加载、并行计划节点持久化、lark-cli 嵌套字段确定性的回归测试
 - 增加 lark-cli 混合输出、歧义输出和非零退出语义回归测试
 - 增加 workflow shell 提取、表达式脱敏、ShellCheck 大 stdin、超时、缺失 binary、异常退出及 shell 优先级测试
 

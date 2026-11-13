@@ -146,3 +146,75 @@ func TestMCPRejectsUnknownToolArguments(t *testing.T) {
 		t.Fatalf("unknown arguments accepted: %s", out.String())
 	}
 }
+
+func TestMCPUsesStartupIdentityAndAcceptsMeta(t *testing.T) {
+	cfg := appcore.DefaultConfig()
+	cfg.Backend = "mock"
+	cfg.Storage = appcore.StorageConfig{Type: "memory", TTL: "45m"}
+	a, err := appcore.Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.DefaultIdentity = kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目 延期","sources":["docs"]},"_meta":{"progressToken":"p1"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目 延期","sources":["docs"],"identity":{"mode":"bot"}}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := New(a).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("responses=%d\n%s", len(lines), out.String())
+	}
+	// Tool calls run concurrently, so responses are matched by id.
+	want := map[int]kernel.Identity{1: {Profile: "work", Mode: kernel.IdentityUser}, 2: {Profile: "work", Mode: kernel.IdentityBot}}
+	for _, line := range lines {
+		var resp struct {
+			ID     int `json:"id"`
+			Result struct {
+				IsError           bool                  `json:"isError"`
+				StructuredContent kernel.SearchSnapshot `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatal(err)
+		}
+		identity, ok := want[resp.ID]
+		if !ok {
+			t.Fatalf("unexpected response: %s", line)
+		}
+		delete(want, resp.ID)
+		if resp.Error != nil || resp.Result.IsError || len(resp.Result.StructuredContent.Candidates) == 0 {
+			t.Fatalf("call %d failed: %s", resp.ID, line)
+		}
+		scope := identity.Normalized().ScopeKey
+		if got := resp.Result.StructuredContent.Candidates[0].Ref.ScopeKey; got != scope {
+			t.Fatalf("call %d scope=%s want %s (%+v)", resp.ID, got, scope, identity)
+		}
+	}
+}
+
+func TestMCPRejectsIdentityOutsidePinnedStartupValue(t *testing.T) {
+	cfg := appcore.DefaultConfig()
+	cfg.Backend = "mock"
+	cfg.Storage = appcore.StorageConfig{Type: "memory", TTL: "45m"}
+	a, err := appcore.Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.DefaultIdentity = kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}
+	a.PinProfile = true
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目","identity":{"profile":"personal"}}}}` + "\n"
+	var out bytes.Buffer
+	if err := New(a).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "identity_pinned") {
+		t.Fatalf("pinned profile override accepted: %s", out.String())
+	}
+}

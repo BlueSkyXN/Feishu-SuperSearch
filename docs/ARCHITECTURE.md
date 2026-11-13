@@ -217,6 +217,8 @@ RetrievalEvents
 
 复用 Session 时必须匹配 identity `ScopeKey`。
 
+Session 是只增的检索工作区：Search、Query、Fetch、Expand 写入的候选、Artifact 和关系只增不删，同一计划里的多个 search 节点因此可以共用一个 Session。请求、来源游标和来源运行状态属于最近一次 Search，`Continue` 继续的是最近一次 Search。
+
 ## 11. Adapter
 
 ### lark-cli
@@ -261,7 +263,7 @@ Kernel 负责机制：
 Fetch/Expand/Session
 ```
 
-Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。`research` 到此为止并产生确定性 digest。
+Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。正文 chunk 按空行与 Markdown 标题切成不超过 600 字的段落，每个 chunk 保留与查询词重合最多的 4 段，`quote` 是段落原文，`source_span` 是它在 chunk 中的字符偏移；正文证据合计不超过 512 KiB。原生摘要与待办各成一条证据。`research` 到此为止并产生确定性 digest。
 
 AI 位于 Kernel 外，通过三个端口接入：
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -192,7 +193,7 @@ func TestLoadConfigAIEnvironmentDoesNotStoreSecret(t *testing.T) {
 func TestNormalizeAndConfigAccessors(t *testing.T) {
 	cfg := Config{Version: 2, Storage: StorageConfig{Type: " FILE "}, Runtime: RuntimeConfig{SessionDir: "~/sessions"}, Replay: ReplayConfig{Dir: "~/replay"}}
 	normalize(&cfg)
-	if cfg.Backend != "auto" || cfg.Runtime.GlobalConcurrency != 6 || cfg.Runtime.ProviderTimeout != "4s" || cfg.Runtime.Listen == "" {
+	if cfg.Backend != "auto" || cfg.Runtime.GlobalConcurrency != 6 || cfg.Runtime.ProviderTimeout != "8s" || cfg.Runtime.Listen == "" {
 		t.Fatalf("runtime defaults=%+v", cfg.Runtime)
 	}
 	if cfg.Storage.Type != "file" || cfg.Storage.TTL != "45m" || !strings.HasSuffix(cfg.Storage.Path, "sessions") {
@@ -226,7 +227,7 @@ func TestNormalizeAndConfigAccessors(t *testing.T) {
 	cfg.OpenAPI.Timeout = "bad"
 	cfg.Planner.Timeout = "bad"
 	cfg.AI.Timeout = "0s"
-	if cfg.ProviderTimeout() != 4*time.Second || cfg.SessionTTL() != 45*time.Minute || cfg.LarkTimeout() != 8*time.Second || cfg.OpenAPITimeout() != 10*time.Second || cfg.PlannerTimeout() != 30*time.Second || cfg.AITimeout() != 45*time.Second {
+	if cfg.ProviderTimeout() != 8*time.Second || cfg.SessionTTL() != 45*time.Minute || cfg.LarkTimeout() != 8*time.Second || cfg.OpenAPITimeout() != 10*time.Second || cfg.PlannerTimeout() != 30*time.Second || cfg.AITimeout() != 45*time.Second {
 		t.Fatal("duration fallbacks mismatch")
 	}
 	if cfg.AIFeatureTimeout(AIFeatureConfig{Timeout: "7s"}) != 7*time.Second || cfg.AIFeatureTimeout(AIFeatureConfig{Timeout: "bad"}) != 45*time.Second {
@@ -398,4 +399,43 @@ func TestLoadConfigRejectsReadParseAndMultipleValueErrors(t *testing.T) {
 func strconvQuote(value string) string {
 	b, _ := json.Marshal(value)
 	return string(b)
+}
+
+func TestRequestIdentityFillsOnlyMissingFields(t *testing.T) {
+	a := &App{DefaultIdentity: kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}}
+	cases := []struct {
+		in, want kernel.Identity
+	}{
+		{kernel.Identity{}, kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}},
+		{kernel.Identity{Mode: kernel.IdentityBot}, kernel.Identity{Profile: "work", Mode: kernel.IdentityBot}},
+		{kernel.Identity{Profile: " other "}, kernel.Identity{Profile: "other", Mode: kernel.IdentityUser}},
+		{kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto, ScopeKey: "forged"}, kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto}},
+	}
+	for _, c := range cases {
+		got, err := a.RequestIdentity(c.in)
+		if err != nil || got != c.want {
+			t.Fatalf("RequestIdentity(%+v)=%+v,%v want %+v", c.in, got, err, c.want)
+		}
+	}
+}
+
+func TestRequestIdentityRejectsChangingPinnedValues(t *testing.T) {
+	a := &App{DefaultIdentity: kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}, PinProfile: true, PinMode: true}
+	for _, ok := range []kernel.Identity{{}, {Profile: "work"}, {Mode: kernel.IdentityUser}, {Profile: "work", Mode: kernel.IdentityUser}} {
+		if got, err := a.RequestIdentity(ok); err != nil || got.Profile != "work" || got.Mode != kernel.IdentityUser {
+			t.Fatalf("RequestIdentity(%+v)=%+v,%v want work/user", ok, got, err)
+		}
+	}
+	for _, bad := range []kernel.Identity{{Profile: "personal"}, {Mode: kernel.IdentityBot}, {Mode: kernel.IdentityAuto}} {
+		_, err := a.RequestIdentity(bad)
+		var detail *kernel.ErrorDetail
+		if !errors.As(err, &detail) || detail.Type != kernel.ErrIdentityRequired || detail.Subtype != "identity_pinned" {
+			t.Fatalf("RequestIdentity(%+v) err=%v, want identity_pinned", bad, err)
+		}
+	}
+	// Only the explicitly given flag is pinned.
+	modeOnly := &App{DefaultIdentity: kernel.Identity{Mode: kernel.IdentityUser}, PinMode: true}
+	if got, err := modeOnly.RequestIdentity(kernel.Identity{Profile: "personal"}); err != nil || got.Profile != "personal" || got.Mode != kernel.IdentityUser {
+		t.Fatalf("mode-only pin: %+v,%v", got, err)
+	}
 }

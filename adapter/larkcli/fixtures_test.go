@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 )
@@ -179,5 +180,59 @@ func TestLarkCLI179SchemaDriftIgnoresUnknownFields(t *testing.T) {
 	page := (&Provider{spec: spec}).parsePage(data, envelope, kernel.Identity{Mode: kernel.IdentityUser, ScopeKey: "fixture"})
 	if len(page.Candidates) != 1 || page.Candidates[0].Ref.NativeID != "dox_drift" {
 		t.Fatalf("page=%+v", page)
+	}
+}
+
+// Search output structure measured with lark-cli 1.0.100 (values replaced with
+// invented samples). Titles, snippets, URLs and times sit in fields the 1.0.79
+// fixtures do not use, so every candidate field is checked, not only the ID.
+func TestLarkCLI1100SearchShapesFillCandidateFields(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("testdata", "lark-cli", "1.0.100", "search-shapes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures map[kernel.SourceID]json.RawMessage
+	if err := json.Unmarshal(payload, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	ts := func(value string) string {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed.UTC().Format(time.RFC3339)
+	}
+	want := map[kernel.SourceID]struct{ id, title, snippet, url, at string }{
+		kernel.SourceDocs:     {"doxSAMPLE", "项目周报", "本周项目进展摘要", "https://example.feishu.cn/docx/doxSAMPLE", time.Unix(1785400000, 0).UTC().Format(time.RFC3339)},
+		kernel.SourceMinutes:  {"obcnSAMPLE", "项目评审会议", "讨论项目排期", "https://applink.feishu.cn/client/minutes/obcnSAMPLE", ""},
+		kernel.SourceMeetings: {"7000000000000000001", "项目周会", "会议描述", "https://applink.feishu.cn/client/meeting/7000000000000000001", ""},
+		kernel.SourcePeople:   {"ou_sample", "示例同事", "sample@example.com", "", ""},
+		kernel.SourceMail:     {"me/msg_sample", "项目进度", "", "", ts("2026-07-30T02:00:00Z")},
+		kernel.SourceCalendar: {"primary/evt_sample", "项目同步", "", "", ts("2026-07-30T10:00:00+08:00")},
+	}
+	for _, spec := range BuiltinSpecs() {
+		expected, ok := want[spec.Descriptor.Source]
+		if !ok {
+			continue
+		}
+		t.Run(string(spec.Descriptor.Source), func(t *testing.T) {
+			envelope, data, err := ParseEnvelope(CommandResult{ExitCode: 0, Stdout: fixtures[spec.Descriptor.Source]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := (&Provider{spec: spec}).parsePage(data, envelope, kernel.Identity{Mode: kernel.IdentityUser, ScopeKey: "fixture"})
+			if len(page.Candidates) != 1 {
+				t.Fatalf("page=%+v", page)
+			}
+			c := page.Candidates[0]
+			at := ""
+			if c.Timestamp != nil {
+				at = c.Timestamp.UTC().Format(time.RFC3339)
+			}
+			got := struct{ id, title, snippet, url, at string }{c.Ref.NativeID, c.Title, c.Snippet, c.URL, at}
+			if got != expected {
+				t.Fatalf("candidate fields\n got %+v\nwant %+v", got, expected)
+			}
+		})
 	}
 }

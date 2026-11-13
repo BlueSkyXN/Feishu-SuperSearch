@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -350,7 +351,18 @@ func (p *Provider) parsePage(data any, env Envelope, identity kernel.Identity) k
 	page := kernel.CandidatePage{RawCount: len(items), Metadata: map[string]any{}}
 	page.NextCursor = findString(root, []string{"page_token", "next_page_token", "next_cursor", "cursor"})
 	page.HasMore = findBool(root, []string{"has_more", "has_next"}) || page.NextCursor != ""
+	// lark-cli 1.0.100 reports the calendar once per page instead of per event;
+	// Fetch needs it, so it is copied into events that lack it.
+	pageCalendarID := ""
+	if p.spec.Descriptor.Source == kernel.SourceCalendar {
+		pageCalendarID, _ = root["calendar_id"].(string)
+	}
 	for i, item := range items {
+		if pageCalendarID != "" && findString(item, []string{"calendar_id"}) == "" {
+			withCalendar := maps.Clone(item)
+			withCalendar["calendar_id"] = pageCalendarID
+			item = withCalendar
+		}
 		c := p.itemToCandidate(item, i+1, identity)
 		page.Candidates = append(page.Candidates, c)
 	}
@@ -408,8 +420,8 @@ func findRecordMatrix(value any, depth int) map[string]any {
 				return current
 			}
 		}
-		for _, child := range current {
-			if found := findRecordMatrix(child, depth+1); found != nil {
+		for _, k := range sortedKeys(current) {
+			if found := findRecordMatrix(current[k], depth+1); found != nil {
 				return found
 			}
 		}
@@ -537,6 +549,10 @@ func (p *Provider) parseArtifact(r kernel.ProviderFetchRequest, data any, genera
 	if text := strings.TrimSpace(content); text != "" {
 		a.Chunks = []kernel.ContentChunk{{ID: "content", Kind: "text", Text: text}}
 		a.Projection |= kernel.ProjectionContent
+	} else if p.spec.Descriptor.Source == kernel.SourceMessages && findString(m, []string{"msg_type"}) != "" {
+		// The message body was read but has no text (for example a card that
+		// holds only images). Its content is materialized and empty.
+		a.Projection |= kernel.ProjectionContent
 	}
 	if p.spec.Descriptor.FetchableProjection.Has(kernel.ProjectionSummary) {
 		if sum := extractSummary(m); sum != nil {
@@ -629,6 +645,11 @@ func (p *Provider) parseRelations(r kernel.ProviderExpandRequest, data any) []ke
 				rel = "meeting.has_minute"
 				source = kernel.SourceMinutes
 			case "doc_token", "document_id":
+				// In a docs fetch these name the document itself (a wiki node's
+				// underlying docx), not a linked document.
+				if p.spec.Descriptor.Source == kernel.SourceDocs {
+					continue
+				}
 				kind = kernel.KindDocument
 				rel = "message.links_to_document"
 				source = kernel.SourceDocs
@@ -734,42 +755,94 @@ func toMapSlice(v any) []map[string]any {
 	return nil
 }
 
+// findString returns the first non-empty value for keys, searching m level by
+// level: all objects at one depth are checked, in key-priority order, before
+// any deeper object. Sibling objects are visited in sorted key order, so the
+// result does not depend on Go's random map iteration order.
 func findString(m map[string]any, keys []string) string {
-	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			switch x := v.(type) {
-			case string:
-				if strings.TrimSpace(x) != "" {
-					return x
-				}
-			case json.Number:
-				return x.String()
-			case float64:
-				return strconv.FormatFloat(x, 'f', -1, 64)
-			case map[string]any:
-				if s := findString(x, []string{"name", "text", "content", "value", "url"}); s != "" {
+	for level := []map[string]any{m}; len(level) > 0; level = childObjects(level) {
+		for _, k := range keys {
+			for _, object := range level {
+				if s, ok := stringField(object, k); ok {
 					return s
 				}
 			}
 		}
 	}
-	for _, v := range m {
-		switch child := v.(type) {
-		case map[string]any:
-			if s := findString(child, keys); s != "" {
-				return s
-			}
-		case []any:
-			for _, item := range child {
-				if object, ok := item.(map[string]any); ok {
-					if s := findString(object, keys); s != "" {
-						return s
+	return ""
+}
+
+func stringField(m map[string]any, key string) (string, bool) {
+	v, ok := lookupPath(m, key)
+	if !ok {
+		return "", false
+	}
+	switch x := v.(type) {
+	case string:
+		if strings.TrimSpace(x) != "" {
+			return x, true
+		}
+	case json.Number:
+		return x.String(), true
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64), true
+	case map[string]any:
+		if s := findString(x, []string{"name", "text", "content", "value", "url"}); s != "" {
+			return s, true
+		}
+	}
+	return "", false
+}
+
+// lookupPath resolves key in m. A dotted key such as "start.date_time" names
+// a path through nested objects; spec field lists use it where a plain key
+// would match the wrong sibling.
+func lookupPath(m map[string]any, key string) (any, bool) {
+	if !strings.Contains(key, ".") {
+		v, ok := m[key]
+		return v, ok
+	}
+	var current any = m
+	for _, part := range strings.Split(key, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if current, ok = object[part]; !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+// childObjects returns the objects directly below level: object values and
+// objects inside array values, in sorted key order.
+func childObjects(level []map[string]any) []map[string]any {
+	var next []map[string]any
+	for _, object := range level {
+		for _, k := range sortedKeys(object) {
+			switch child := object[k].(type) {
+			case map[string]any:
+				next = append(next, child)
+			case []any:
+				for _, item := range child {
+					if nested, ok := item.(map[string]any); ok {
+						next = append(next, nested)
 					}
 				}
 			}
 		}
 	}
-	return ""
+	return next
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func findBool(m map[string]any, keys []string) bool {
@@ -783,8 +856,12 @@ func findBool(m map[string]any, keys []string) bool {
 	return false
 }
 
+// highlightTagRE matches the search highlight markup lark-cli returns in
+// titles and summaries (<h>, <hb>, <b>, <em>).
+var highlightTagRE = regexp.MustCompile(`</?(?:h|hb|b|em)>`)
+
 func cleanText(s string) string {
-	s = strings.TrimSpace(s)
+	s = strings.TrimSpace(highlightTagRE.ReplaceAllString(s, ""))
 	if s == "" {
 		return s
 	}
@@ -815,8 +892,17 @@ func findTime(m map[string]any, keys []string) *time.Time {
 		t := time.Unix(n, 0).UTC()
 		return &t
 	}
-	for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339, time.RFC3339Nano} {
 		if t, err := time.Parse(layout, raw); err == nil {
+			return &t
+		}
+	}
+	// lark-cli prints some times without a zone (messages "2006-01-02 15:04",
+	// tasks "2006-01-02 15:04:05") in the local time zone of the machine it
+	// runs on, which is the machine sfs runs on.
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			t = t.UTC()
 			return &t
 		}
 	}
@@ -886,7 +972,8 @@ func normalizeContentText(value string) string {
 				walk(child)
 			}
 		case map[string]any:
-			for _, key := range []string{"title", "text", "content"} {
+			// "elements" holds the body of interactive card messages.
+			for _, key := range []string{"title", "text", "content", "elements"} {
 				if child, ok := item[key]; ok {
 					walk(child)
 				}
@@ -915,23 +1002,16 @@ func extractSummary(m map[string]any) *kernel.NativeSummary {
 	return &s
 }
 
+// findAny returns the value of key from the shallowest object that has it,
+// using the same deterministic order as findString.
 func findAny(m map[string]any, key string) any {
 	if v, ok := m[key]; ok {
 		return v
 	}
-	for _, v := range m {
-		switch child := v.(type) {
-		case map[string]any:
-			if found := findAny(child, key); found != nil {
-				return found
-			}
-		case []any:
-			for _, item := range child {
-				if object, ok := item.(map[string]any); ok {
-					if found := findAny(object, key); found != nil {
-						return found
-					}
-				}
+	for level := childObjects([]map[string]any{m}); len(level) > 0; level = childObjects(level) {
+		for _, object := range level {
+			if v := object[key]; v != nil {
+				return v
 			}
 		}
 	}
@@ -960,7 +1040,8 @@ func findAllStrings(m map[string]any, keys []string) map[string][]string {
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
-			for k, val := range x {
+			for _, k := range sortedKeys(x) {
+				val := x[k]
 				if wanted[k] {
 					switch y := val.(type) {
 					case string:

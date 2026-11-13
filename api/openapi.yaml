@@ -664,6 +664,7 @@ components:
               status: {type: string}
               version: {type: string}
               error: {$ref: '#/components/schemas/ErrorDetail'}
+              observed_at: {type: string, format: date-time}
               operations:
                 type: object
                 additionalProperties:

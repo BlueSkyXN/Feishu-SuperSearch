@@ -144,6 +144,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	defer app.Close()
 	identity := clicore.ParseIdentity(g.profile, g.identity)
+	// serve and mcp take identity from each request; requests that omit it use
+	// the startup --profile/--as, and explicitly given flags pin the value.
+	app.DefaultIdentity = identity
+	gfs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "profile":
+			app.PinProfile = true
+		case "as":
+			app.PinMode = true
+		}
+	})
 
 	switch cmd {
 	case "providers":
@@ -511,6 +522,9 @@ func cmdPlan(ctx context.Context, a *appcore.App, format string, args []string, 
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return err
 	}
+	if plan.Identity, err = a.RequestIdentity(plan.Identity); err != nil {
+		return err
+	}
 	events, results, err := a.Engine.Execute(ctx, plan)
 	if err != nil {
 		return err
@@ -633,7 +647,7 @@ func parseResearchCommand(a *appcore.App, id kernel.Identity, name string, args 
 			return planner.UserRequest{}, nil, err
 		}
 	}
-	req := planner.UserRequest{Query: q, Sources: clicore.ParseSources(*sources), Identity: id, Limit: *limit, Deep: true, FetchTopK: *fetchTop, Budget: kernel.SearchBudget{DeadlineMS: int(deadline.Milliseconds()), MaxCalls: 36, MaxFetches: *fetchTop, MaxPagesPerSource: 2}}
+	req := planner.UserRequest{Query: q, Sources: clicore.ParseSources(*sources), Identity: id, Limit: *limit, Deep: true, FetchTopK: *fetchTop, Budget: kernel.SearchBudget{DeadlineMS: int(deadline.Milliseconds())}}
 	return req, selectedPlanner, nil
 }
 

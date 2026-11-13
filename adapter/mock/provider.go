@@ -189,10 +189,11 @@ func paginate(items []kernel.Candidate, size int, cursor string) kernel.Candidat
 		next = encodeCursor(end)
 	}
 	out := append([]kernel.Candidate(nil), items[offset:end]...)
+	// Ranks are page-local; the engine adds the offset of earlier pages.
 	for i := range out {
-		out[i].NativeRank = offset + i + 1
+		out[i].NativeRank = i + 1
 		if len(out[i].DiscoveredBy) > 0 {
-			out[i].DiscoveredBy[0].Rank = offset + i + 1
+			out[i].DiscoveredBy[0].Rank = i + 1
 		}
 	}
 	return kernel.CandidatePage{Candidates: out, NextCursor: next, HasMore: more, RawCount: len(out)}

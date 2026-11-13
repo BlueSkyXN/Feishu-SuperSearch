@@ -559,6 +559,8 @@ type ProviderCapability struct {
 	Version    string                                    `json:"version,omitempty"`
 	Error      *ErrorDetail                              `json:"error,omitempty"`
 	Operations map[Operation]ProviderOperationCapability `json:"operations,omitempty"`
+	// ObservedAt is when the provider was last probed; nil if it never was.
+	ObservedAt *time.Time `json:"observed_at,omitempty"`
 }
 
 type ProviderOperationCapability struct {

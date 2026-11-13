@@ -41,7 +41,7 @@ func New(registry *provider.Registry, store session.Store, cfg Config) *Engine {
 		cfg.GlobalConcurrency = 6
 	}
 	if cfg.ProviderTimeout <= 0 {
-		cfg.ProviderTimeout = 4 * time.Second
+		cfg.ProviderTimeout = 8 * time.Second
 	}
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = 45 * time.Minute
@@ -106,7 +106,8 @@ func (e *Engine) Capabilities(ctx context.Context, req kernel.CapabilityRequest)
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			descriptor := p.Descriptor()
-			capability := kernel.ProviderCapability{Descriptor: descriptor, Status: kernel.StatusOK, Version: descriptor.Version}
+			observed := out.GeneratedAt
+			capability := kernel.ProviderCapability{Descriptor: descriptor, Status: kernel.StatusOK, Version: descriptor.Version, ObservedAt: &observed}
 			if checker, ok := p.(kernel.HealthChecker); ok {
 				probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 				version, err := checker.Health(probeCtx, req.Identity)
