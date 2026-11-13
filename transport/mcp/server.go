@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	appcore "github.com/BlueSkyXN/Feishu-SuperSearch/internal/app"
 	askcore "github.com/BlueSkyXN/Feishu-SuperSearch/internal/ask"
@@ -75,43 +76,90 @@ type toolCall struct {
 	Meta json.RawMessage `json:"_meta,omitempty"`
 }
 
+// maxConcurrentToolCalls bounds the tools/call requests that run at once. Each
+// call bounds its own upstream concurrency; this keeps a client that pipelines
+// many calls from multiplying it without limit.
+const maxConcurrentToolCalls = 4
+
+// Serve reads newline-delimited JSON-RPC messages from in and writes responses
+// to out. Requests other than tools/call finish immediately and are answered
+// in order. Each tools/call runs in its own goroutine so that a long research
+// call does not block later requests, and notifications/cancelled (or
+// $/cancelRequest) cancels it; a cancelled call gets no response, as the MCP
+// specification asks. At end of input Serve waits for running calls.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	if s.App == nil {
 		return fmt.Errorf("mcp app is nil")
 	}
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	enc := json.NewEncoder(out)
-	enc.SetEscapeHTML(false)
+	w := newResponseWriter(out)
+	calls := &callTracker{calls: map[string]*runningCall{}}
+	slots := make(chan struct{}, maxConcurrentToolCalls)
+	var wg sync.WaitGroup
 	for scanner.Scan() {
+		if w.failed() != nil {
+			break
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		var req request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			_ = enc.Encode(response{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error", Data: err.Error()}})
+			w.write(response{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error", Data: err.Error()}})
 			continue
+		}
+		if id, ok := cancelledRequestKey(req); ok {
+			calls.cancel(id)
 		}
 		// Notifications intentionally have no response.
-		notification := len(req.ID) == 0 || string(req.ID) == "null"
-		result, rerr := s.handle(ctx, req)
-		if notification {
+		if len(req.ID) == 0 || string(req.ID) == "null" {
 			continue
 		}
-		resp := response{JSONRPC: "2.0", ID: req.ID, Result: result}
-		if rerr != nil {
-			resp.Result = nil
-			resp.Error = rerr
+		if req.Method != "tools/call" {
+			result, rerr := s.handle(ctx, req)
+			w.write(newResponse(req.ID, result, rerr))
+			continue
 		}
-		if err := enc.Encode(resp); err != nil {
-			return err
-		}
+		callCtx, cancel := context.WithCancel(ctx)
+		key := requestKey(req.ID)
+		call := calls.start(key, cancel)
+		wg.Add(1)
+		go func(req request) {
+			defer wg.Done()
+			defer calls.finish(key, call)
+			defer cancel()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-callCtx.Done():
+				if !call.cancelledByClient() {
+					w.write(newResponse(req.ID, nil, &rpcError{Code: -32603, Message: "server is shutting down"}))
+				}
+				return
+			}
+			result, rerr := s.handle(callCtx, req)
+			if call.cancelledByClient() {
+				return
+			}
+			w.write(newResponse(req.ID, result, rerr))
+		}(req)
 	}
-	if err := scanner.Err(); err != nil {
+	wg.Wait()
+	if err := w.failed(); err != nil {
 		return err
 	}
-	return nil
+	return scanner.Err()
+}
+
+func newResponse(id json.RawMessage, result any, rerr *rpcError) response {
+	resp := response{JSONRPC: "2.0", ID: id, Result: result}
+	if rerr != nil {
+		resp.Result = nil
+		resp.Error = rerr
+	}
+	return resp
 }
 
 func (s *Server) handle(ctx context.Context, req request) (any, *rpcError) {

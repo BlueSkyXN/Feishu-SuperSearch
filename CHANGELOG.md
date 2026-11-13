@@ -14,6 +14,7 @@
 - 翻页结果的来源内名次改由 Kernel 统一加页偏移，第 2 页不再与第 1 页同名次、同分并穿插排序；Provider 契约改为返回页内名次，mock Provider 同步调整
 - MCP `tools/call` 接受协议保留的 `_meta` 字段，不再以 `-32602` 拒绝带 progressToken 等元数据的请求
 - SQLite Session 存储在同一进程内共享一个 Session 实例，并串行化同一 Session 的读写；计划中并行节点写同一 Session 时不再互相覆盖。其他进程保存过的 Session 会在下次读取时重新加载
+- MCP `tools/call` 改为并发执行（最多 4 个），长时间的 research 不再阻塞后续请求；`notifications/cancelled` 与 `$/cancelRequest` 会取消对应调用，被取消的调用不再返回响应。此前取消通知不起作用，调用要跑到预算截止时间才结束
 - lark-cli 字段抽取在顶层找不到字段时逐层查找，同一层按字段优先级、同级对象按 key 排序，结果不再随 map 遍历顺序变化
 
 - lark-cli 输出解析现在只在 stdout/stderr 合计存在唯一、行边界完整且带显式 `ok` 的 envelope 时容忍诊断文本；多 JSON、失败流冲突、混合 raw JSON 与非零退出成功 envelope 继续 fail closed

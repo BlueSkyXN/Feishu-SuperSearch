@@ -169,9 +169,11 @@ func TestMCPUsesStartupIdentityAndAcceptsMeta(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("responses=%d\n%s", len(lines), out.String())
 	}
-	want := []kernel.Identity{{Profile: "work", Mode: kernel.IdentityUser}, {Profile: "work", Mode: kernel.IdentityBot}}
-	for i, line := range lines {
+	// Tool calls run concurrently, so responses are matched by id.
+	want := map[int]kernel.Identity{1: {Profile: "work", Mode: kernel.IdentityUser}, 2: {Profile: "work", Mode: kernel.IdentityBot}}
+	for _, line := range lines {
 		var resp struct {
+			ID     int `json:"id"`
 			Result struct {
 				IsError           bool                  `json:"isError"`
 				StructuredContent kernel.SearchSnapshot `json:"structuredContent"`
@@ -181,12 +183,17 @@ func TestMCPUsesStartupIdentityAndAcceptsMeta(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &resp); err != nil {
 			t.Fatal(err)
 		}
-		if resp.Error != nil || resp.Result.IsError || len(resp.Result.StructuredContent.Candidates) == 0 {
-			t.Fatalf("call %d failed: %s", i+1, line)
+		identity, ok := want[resp.ID]
+		if !ok {
+			t.Fatalf("unexpected response: %s", line)
 		}
-		scope := want[i].Normalized().ScopeKey
+		delete(want, resp.ID)
+		if resp.Error != nil || resp.Result.IsError || len(resp.Result.StructuredContent.Candidates) == 0 {
+			t.Fatalf("call %d failed: %s", resp.ID, line)
+		}
+		scope := identity.Normalized().ScopeKey
 		if got := resp.Result.StructuredContent.Candidates[0].Ref.ScopeKey; got != scope {
-			t.Fatalf("call %d scope=%s want %s (%+v)", i+1, got, scope, want[i])
+			t.Fatalf("call %d scope=%s want %s (%+v)", resp.ID, got, scope, identity)
 		}
 	}
 }

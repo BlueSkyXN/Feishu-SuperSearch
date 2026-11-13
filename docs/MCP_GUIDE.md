@@ -22,6 +22,8 @@ MCP 使用 stdio：
 
 不要通过会向 stdout 打日志的 shell 包装器启动 MCP。
 
+`tools/call` 并发执行，最多同时 4 个，响应按 `id` 对应，顺序不保证与请求一致；其他请求按收到的顺序立即应答。发送 `notifications/cancelled`（`params.requestId`）可取消进行中的调用，被取消的调用不再返回响应。
+
 ## 2. 工具列表
 
 | 工具 | 作用 |
