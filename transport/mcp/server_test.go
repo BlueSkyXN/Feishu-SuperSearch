@@ -190,3 +190,24 @@ func TestMCPUsesStartupIdentityAndAcceptsMeta(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPRejectsIdentityOutsidePinnedStartupValue(t *testing.T) {
+	cfg := appcore.DefaultConfig()
+	cfg.Backend = "mock"
+	cfg.Storage = appcore.StorageConfig{Type: "memory", TTL: "45m"}
+	a, err := appcore.Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.DefaultIdentity = kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}
+	a.PinProfile = true
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目","identity":{"profile":"personal"}}}}` + "\n"
+	var out bytes.Buffer
+	if err := New(a).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "identity_pinned") {
+		t.Fatalf("pinned profile override accepted: %s", out.String())
+	}
+}

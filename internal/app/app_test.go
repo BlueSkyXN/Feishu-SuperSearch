@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -411,8 +412,30 @@ func TestRequestIdentityFillsOnlyMissingFields(t *testing.T) {
 		{kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto, ScopeKey: "forged"}, kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto}},
 	}
 	for _, c := range cases {
-		if got := a.RequestIdentity(c.in); got != c.want {
-			t.Fatalf("RequestIdentity(%+v)=%+v want %+v", c.in, got, c.want)
+		got, err := a.RequestIdentity(c.in)
+		if err != nil || got != c.want {
+			t.Fatalf("RequestIdentity(%+v)=%+v,%v want %+v", c.in, got, err, c.want)
 		}
+	}
+}
+
+func TestRequestIdentityRejectsChangingPinnedValues(t *testing.T) {
+	a := &App{DefaultIdentity: kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}, PinProfile: true, PinMode: true}
+	for _, ok := range []kernel.Identity{{}, {Profile: "work"}, {Mode: kernel.IdentityUser}, {Profile: "work", Mode: kernel.IdentityUser}} {
+		if got, err := a.RequestIdentity(ok); err != nil || got.Profile != "work" || got.Mode != kernel.IdentityUser {
+			t.Fatalf("RequestIdentity(%+v)=%+v,%v want work/user", ok, got, err)
+		}
+	}
+	for _, bad := range []kernel.Identity{{Profile: "personal"}, {Mode: kernel.IdentityBot}, {Mode: kernel.IdentityAuto}} {
+		_, err := a.RequestIdentity(bad)
+		var detail *kernel.ErrorDetail
+		if !errors.As(err, &detail) || detail.Type != kernel.ErrIdentityRequired || detail.Subtype != "identity_pinned" {
+			t.Fatalf("RequestIdentity(%+v) err=%v, want identity_pinned", bad, err)
+		}
+	}
+	// Only the explicitly given flag is pinned.
+	modeOnly := &App{DefaultIdentity: kernel.Identity{Mode: kernel.IdentityUser}, PinMode: true}
+	if got, err := modeOnly.RequestIdentity(kernel.Identity{Profile: "personal"}); err != nil || got.Profile != "personal" || got.Mode != kernel.IdentityUser {
+		t.Fatalf("mode-only pin: %+v,%v", got, err)
 	}
 }

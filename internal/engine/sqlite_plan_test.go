@@ -90,3 +90,67 @@ func runPlanWithSQLite(t *testing.T, path, raw string) (string, map[kernel.Sourc
 	}
 	return result.SessionID, want
 }
+
+// Two search nodes share the plan's session. The later search must not remove
+// the earlier one's candidates, otherwise map_fetch rejects their refs as not
+// present in the session.
+func TestPlanTwoSearchNodesKeepBothResultsForMapFetch(t *testing.T) {
+	plan := `{
+	  "version": "retrieval-plan/v1",
+	  "identity": {"mode": "user"},
+	  "budget": {"deadline_ms": 15000, "max_calls": 24, "max_fetches": 8},
+	  "nodes": [
+	    {"id": "s_docs", "op": "search", "priority": 100, "request": {"query": "A 项目", "sources": ["docs"], "limit": 10}},
+	    {"id": "s_msgs", "op": "search", "priority": 90, "request": {"query": "A 项目", "sources": ["messages"], "limit": 10}},
+	    {"id": "merge", "op": "merge", "depends_on": ["s_docs", "s_msgs"]},
+	    {"id": "fetch", "op": "map_fetch", "depends_on": ["merge"], "max_items": 6, "request": {"top_k": 6, "max_items": 6}}
+	  ],
+	  "output": ["s_docs", "s_msgs", "fetch"]
+	}`
+	for _, store := range []struct {
+		name string
+		open func(t *testing.T) session.Store
+	}{
+		{"memory", func(t *testing.T) session.Store { return session.NewMemoryStore(time.Hour) }},
+		{"sqlite", func(t *testing.T) session.Store {
+			s, err := session.NewSQLiteStore(filepath.Join(t.TempDir(), "sfs.db"), time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return s
+		}},
+	} {
+		t.Run(store.name, func(t *testing.T) {
+			registry := provider.NewRegistry()
+			for _, p := range mock.NewProviders(mock.DemoDataset()) {
+				if err := registry.Register(p, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e := engine.New(registry, store.open(t), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+			defer e.Close()
+			var p kernel.RetrievalPlan
+			if err := json.Unmarshal([]byte(plan), &p); err != nil {
+				t.Fatal(err)
+			}
+			events, results, err := e.Execute(context.Background(), p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range events {
+			}
+			result := <-results
+			fetch := result.Output["fetch"]
+			if fetch.State != kernel.NodeSucceeded || fetch.Error != nil {
+				t.Fatalf("map_fetch state=%s error=%+v", fetch.State, fetch.Error)
+			}
+			sources := map[kernel.SourceID]bool{}
+			for _, a := range fetch.Artifacts {
+				sources[a.Ref.Source] = true
+			}
+			if !sources[kernel.SourceDocs] || !sources[kernel.SourceMessages] {
+				t.Fatalf("map_fetch read sources %v, want docs and messages", sources)
+			}
+		})
+	}
+}

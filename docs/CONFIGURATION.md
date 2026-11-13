@@ -114,7 +114,7 @@ sfs --config ~/.config/sfs/config.json providers
 - `timeout` 是子进程时限。一次 Search 或 Query 同时受 `runtime.provider_timeout` 限制，实际生效的是两者中较小的值，搜索超时时先调大 `runtime.provider_timeout`；
 - 输出上限用于防止异常 Provider 占用无限内存。
 
-身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。`sfs serve` 和 `sfs mcp` 中，请求省略的 `profile`、`mode` 取启动时的 `--profile`、`--as`。
+身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。`sfs serve` 和 `sfs mcp` 中，请求省略的 `profile`、`mode` 取启动时的 `--profile`、`--as`；显式给出的启动值不能被请求改成其他值。
 
 ## 7. Direct OpenAPI
 

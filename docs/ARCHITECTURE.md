@@ -217,6 +217,8 @@ RetrievalEvents
 
 复用 Session 时必须匹配 identity `ScopeKey`。
 
+Session 是只增的检索工作区：Search、Query、Fetch、Expand 写入的候选、Artifact 和关系只增不删，同一计划里的多个 search 节点因此可以共用一个 Session。请求、来源游标和来源运行状态属于最近一次 Search，`Continue` 继续的是最近一次 Search。
+
 ## 11. Adapter
 
 ### lark-cli

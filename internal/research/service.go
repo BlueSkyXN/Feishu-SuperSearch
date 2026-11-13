@@ -55,6 +55,7 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		p = rulesplanner.Planner{}
 	}
 	req.Identity = req.Identity.Normalized()
+	req.Budget = researchBudget(req.UserRequest)
 	emit(progressEvent(PhaseCapabilities, "正在读取 Provider 能力"))
 	caps, err := s.Kernel.Capabilities(ctx, kernel.CapabilityRequest{Identity: req.Identity})
 	if err != nil {
@@ -324,10 +325,42 @@ func normalizedResearchLimitPerSource(request planner.UserRequest) int {
 	return 8
 }
 
+// Research budget defaults, shared by the CLI, HTTP and MCP entry points. A
+// deep run over all nine global sources needs up to 18 search calls (two
+// waves) plus fetch_top_k reads, which exceeds the kernel's general default of
+// 24 calls and 8 seconds.
+const (
+	defaultResearchDeadlineMS = 15000
+	defaultResearchMaxCalls   = 36
+	defaultResearchPages      = 2
+	defaultResearchFetchTopK  = 8
+)
+
+// researchBudget fills the budget fields a research request left at zero.
+func researchBudget(request planner.UserRequest) kernel.SearchBudget {
+	budget := request.Budget
+	if budget.DeadlineMS <= 0 {
+		budget.DeadlineMS = defaultResearchDeadlineMS
+	}
+	if budget.MaxCalls <= 0 {
+		budget.MaxCalls = defaultResearchMaxCalls
+	}
+	if budget.MaxPagesPerSource <= 0 {
+		budget.MaxPagesPerSource = defaultResearchPages
+	}
+	if budget.MaxFetches <= 0 {
+		budget.MaxFetches = request.FetchTopK
+		if budget.MaxFetches <= 0 {
+			budget.MaxFetches = defaultResearchFetchTopK
+		}
+	}
+	return budget
+}
+
 func normalizedResearchFetchTopK(request planner.UserRequest, budget kernel.SearchBudget) int {
 	limit := request.FetchTopK
 	if limit <= 0 {
-		limit = 8
+		limit = defaultResearchFetchTopK
 	}
 	maxFetches := budget.WithDefaults().MaxFetches
 	if maxFetches > 0 && limit > maxFetches {

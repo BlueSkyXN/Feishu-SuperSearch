@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Session 改为只增的检索工作区：后一次 Search 或 Continue 不再清掉之前写入的候选，同一计划中的多个 search 节点可以共用 Session，`map_fetch` 不再以 `fetch ref is not present in the selected session` 拒绝前一个节点的对象。请求、来源游标和来源状态仍属于最近一次 Search
+- `sfs serve`、`sfs mcp` 启动时显式给出的 `--profile`、`--as` 会限定请求可用的身份；请求要求其他值时返回 `identity_required`（`subtype=identity_pinned`）。未显式给出的字段保持按请求选择
+- research 与 ask 的默认预算统一放在 research 服务中（15 秒、36 次调用、每来源 2 页、读取数等于 `fetch_top_k`）；此前只有 CLI 使用这组值，HTTP 与 MCP 落到 8 秒、24 次调用
+
 ### Fixed
 
 - `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段

@@ -387,3 +387,17 @@ func researchArtifact(ref kernel.ObjectRef, text string) kernel.Artifact {
 var _ ai.Reranker = (*researchReranker)(nil)
 var _ planner.Planner = (*researchPlanner)(nil)
 var _ kernel.Kernel = (*researchKernel)(nil)
+
+func TestResearchBudgetDefaultsMatchAcrossEntryPoints(t *testing.T) {
+	got := researchBudget(planner.UserRequest{})
+	if got.DeadlineMS != 15000 || got.MaxCalls != 36 || got.MaxPagesPerSource != 2 || got.MaxFetches != 8 {
+		t.Fatalf("defaults=%+v", got)
+	}
+	if got := researchBudget(planner.UserRequest{FetchTopK: 5}); got.MaxFetches != 5 {
+		t.Fatalf("fetch_top_k should bound fetches: %+v", got)
+	}
+	explicit := kernel.SearchBudget{DeadlineMS: 3000, MaxCalls: 10, MaxPagesPerSource: 1, MaxFetches: 2}
+	if got := researchBudget(planner.UserRequest{Budget: explicit}); got != explicit {
+		t.Fatalf("explicit budget changed: %+v", got)
+	}
+}

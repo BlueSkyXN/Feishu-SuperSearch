@@ -86,8 +86,10 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 		}
 	}
 	budgetState := budget.Snapshot()
+	// A session is an append-only workspace: candidates from earlier searches
+	// and queries stay, so later Fetch/Expand calls can still use them. Paging
+	// state (request, frontiers, source runs) belongs to the latest search.
 	rec.WithLock(func(r *session.Record) {
-		r.Candidates = map[string]kernel.Candidate{}
 		for _, c := range allScored {
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
@@ -177,7 +179,6 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	selected, allScored, unique := rankCandidates(base, all)
 	budgetState := budget.Snapshot()
 	rec.WithLock(func(r *session.Record) {
-		r.Candidates = map[string]kernel.Candidate{}
 		for _, c := range allScored {
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
