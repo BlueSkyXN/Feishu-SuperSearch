@@ -263,7 +263,7 @@ Kernel 负责机制：
 Fetch/Expand/Session
 ```
 
-Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。`research` 到此为止并产生确定性 digest。
+Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。正文 chunk 按空行与 Markdown 标题切成不超过 600 字的段落，每个 chunk 保留与查询词重合最多的 4 段，`quote` 是段落原文，`source_span` 是它在 chunk 中的字符偏移；正文证据合计不超过 512 KiB。原生摘要与待办各成一条证据。`research` 到此为止并产生确定性 digest。
 
 AI 位于 Kernel 外，通过三个端口接入：
 
