@@ -187,7 +187,7 @@ SuperFeishuSearch 不复制或接管 `lark-cli` OAuth；它将 `--profile`、`--
 
 某个来源权限不足、超时或不可用时，其他来源仍可返回，结果会标记 `partial=true` 并保留每来源状态。
 
-当前本机真实只读验证并非 11 来源全通过：docs、messages、chats、people、minutes、meetings、tasks 共 7 个来源成功；calendar、mail 返回 `missing_scope`；Base、Sheets 因缺少已知测试对象尚未完成验收。11 来源 fixture 基线不能替代这一真实矩阵。
+本机真实只读验证（2026-11-13，lark-cli 1.0.100）：9 个全局来源（docs、messages、chats、people、minutes、meetings、calendar、tasks、mail）的 Search 均返回结果，标题、摘要、时间和链接按该版本的实际输出结构解析；Fetch 在 docs、messages、chats、minutes、meetings、calendar、tasks、mail 上成功，其中 docs、messages 读取了正文；Expand 在 messages、meetings 上成功（lark-cli 后端只有这两个来源支持 Expand）。people 的 Fetch 未在本轮验证；Base、Sheets 因缺少已知测试对象尚未验收。结果取决于验证账号的 scope 与可见对象，11 来源 fixture 基线不能替代这一真实矩阵。
 
 最终工作树还重新验证了妙记 `summary/structure/content` Fetch：`minutes[].artifacts` 的嵌套结构和 transcript 文件均成功物化，子进程临时目录清理后仓库原有 `minutes/` 状态未发生变化。
 
@@ -699,7 +699,7 @@ SFS_AI_MODEL
 - rules/default/external Planner
 - HTTP/Web、MCP、Go Client
 
-真实飞书 live 调用无法由 Mock/单元测试替代。当前 lark-cli 真实验证只有 7 个来源成功，calendar/mail 被 `missing_scope` 阻塞，Base/Sheets 缺测试对象；direct OpenAPI 因没有同时可用的 App ID 与 user access token 未做真实验收。是否能读到具体对象，最终取决于用户 Token、应用 scope、租户配置、对象权限及目标 `lark-cli` 版本。
+真实飞书 live 调用无法由 Mock/单元测试替代。lark-cli 的真实验证范围见 §4.1；direct OpenAPI 因没有同时可用的 App ID 与 user access token 未做真实验收。是否能读到具体对象，最终取决于用户 Token、应用 scope、租户配置、对象权限及目标 `lark-cli` 版本。
 
 ## 17. GitHub Actions CI/CD 与开发者验证
 

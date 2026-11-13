@@ -350,7 +350,21 @@ func (p *Provider) parsePage(data any, env Envelope, identity kernel.Identity) k
 	page := kernel.CandidatePage{RawCount: len(items), Metadata: map[string]any{}}
 	page.NextCursor = findString(root, []string{"page_token", "next_page_token", "next_cursor", "cursor"})
 	page.HasMore = findBool(root, []string{"has_more", "has_next"}) || page.NextCursor != ""
+	// lark-cli 1.0.100 reports the calendar once per page instead of per event;
+	// Fetch needs it, so it is copied into events that lack it.
+	pageCalendarID := ""
+	if p.spec.Descriptor.Source == kernel.SourceCalendar {
+		pageCalendarID, _ = root["calendar_id"].(string)
+	}
 	for i, item := range items {
+		if pageCalendarID != "" && findString(item, []string{"calendar_id"}) == "" {
+			withCalendar := make(map[string]any, len(item)+1)
+			for k, v := range item {
+				withCalendar[k] = v
+			}
+			withCalendar["calendar_id"] = pageCalendarID
+			item = withCalendar
+		}
 		c := p.itemToCandidate(item, i+1, identity)
 		page.Candidates = append(page.Candidates, c)
 	}
@@ -633,6 +647,11 @@ func (p *Provider) parseRelations(r kernel.ProviderExpandRequest, data any) []ke
 				rel = "meeting.has_minute"
 				source = kernel.SourceMinutes
 			case "doc_token", "document_id":
+				// In a docs fetch these name the document itself (a wiki node's
+				// underlying docx), not a linked document.
+				if p.spec.Descriptor.Source == kernel.SourceDocs {
+					continue
+				}
 				kind = kernel.KindDocument
 				rel = "message.links_to_document"
 				source = kernel.SourceDocs

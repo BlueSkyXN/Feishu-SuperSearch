@@ -208,7 +208,7 @@ func TestLarkCLI1100SearchShapesFillCandidateFields(t *testing.T) {
 		kernel.SourceMeetings: {"7000000000000000001", "项目周会", "会议描述", "https://applink.feishu.cn/client/meeting/7000000000000000001", ""},
 		kernel.SourcePeople:   {"ou_sample", "示例同事", "sample@example.com", "", ""},
 		kernel.SourceMail:     {"me/msg_sample", "项目进度", "", "", ts("2026-07-30T02:00:00Z")},
-		kernel.SourceCalendar: {"evt_sample", "项目同步", "", "", ts("2026-07-30T10:00:00+08:00")},
+		kernel.SourceCalendar: {"primary/evt_sample", "项目同步", "", "", ts("2026-07-30T10:00:00+08:00")},
 	}
 	for _, spec := range BuiltinSpecs() {
 		expected, ok := want[spec.Descriptor.Source]

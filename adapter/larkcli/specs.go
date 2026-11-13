@@ -48,7 +48,7 @@ func BuiltinSpecs() []SourceSpec {
 		{
 			Descriptor: desc("larkcli.messages", kernel.SourceMessages, []kernel.ObjectKind{kernel.KindMessage}, user, []string{"search:message", "im:message:readonly"}, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet|kernel.ProjectionContent|kernel.ProjectionContext, kernel.ProjectionContent|kernel.ProjectionContext|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"im", "+messages-search", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--sender"},
-			SearchArgs: messagesSearchArgs, FetchArgs: messageFetchArgs, ExpandArgs: messageFetchArgsAsExpand, ItemKeys: []string{"results", "messages", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"chat_name", "title", "subject"}, SnippetKeys: []string{"text", "content", "snippet", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"create_time", "timestamp", "time"},
+			SearchArgs: messagesSearchArgs, FetchArgs: messageFetchArgs, ExpandArgs: messageFetchArgsAsExpand, ItemKeys: []string{"results", "messages", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"chat_name", "title", "subject", "sender.name"}, SnippetKeys: []string{"text", "content", "snippet", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"create_time", "timestamp", "time"},
 		},
 		{
 			Descriptor: desc("larkcli.chats", kernel.SourceChats, []kernel.ObjectKind{kernel.KindChat}, userBot, nil, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionContent|kernel.ProjectionRelations),
@@ -380,13 +380,13 @@ func meetingFetchArgs(r kernel.ProviderFetchRequest) ([]string, error) {
 }
 func calendarFetchArgs(r kernel.ProviderFetchRequest) ([]string, error) {
 	calendarID := metadataString(r.Ref, "calendar_id")
-	if calendarID == "" {
-		return nil, fmt.Errorf("calendar fetch requires calendar_id in ref URL query or native_id 'calendar/event'")
-	}
 	eventID := r.Ref.NativeID
 	if strings.Contains(eventID, "/") {
 		parts := strings.SplitN(eventID, "/", 2)
 		calendarID, eventID = parts[0], parts[1]
+	}
+	if calendarID == "" {
+		return nil, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Source: kernel.SourceCalendar, Message: "calendar fetch requires native_id 'calendar_id/event_id' or calendar_id in the ref URL query"}
 	}
 	if _, err := safePathSegment(calendarID, "calendar id"); err != nil {
 		return nil, err

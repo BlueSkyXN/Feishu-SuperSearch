@@ -112,3 +112,38 @@ func TestMessageFetchAcceptsCardWithoutText(t *testing.T) {
 		t.Fatalf("artifact=%+v err=%v", artifact.Chunks, err)
 	}
 }
+
+// p2p messages from lark-cli 1.0.100 search have no chat_name; the sender's
+// name is the title, as in the OpenAPI adapter.
+func TestMessageTitleFallsBackToSenderName(t *testing.T) {
+	spec := specFor(t, "messages")
+	item := map[string]any{"message_id": "om_p2p", "chat_type": "p2p", "chat_partner": map[string]any{"open_id": "ou_partner"}, "sender": map[string]any{"id": "ou_sender", "id_type": "open_id", "name": "示例同事"}, "content": "你好"}
+	if c := (&Provider{spec: spec}).itemToCandidate(item, 1, kernel.Identity{Mode: kernel.IdentityUser}); c.Title != "示例同事" {
+		t.Fatalf("title=%q", c.Title)
+	}
+	item["chat_name"] = "项目群"
+	if c := (&Provider{spec: spec}).itemToCandidate(item, 1, kernel.Identity{Mode: kernel.IdentityUser}); c.Title != "项目群" {
+		t.Fatalf("group title=%q", c.Title)
+	}
+}
+
+// docs +fetch of a wiki page reports the underlying docx as document.document_id;
+// that is the document itself, not a link.
+func TestDocsFetchDoesNotRelateDocumentToItself(t *testing.T) {
+	spec := specFor(t, "docs")
+	data := map[string]any{"document": map[string]any{"document_id": "doxUNDERLYING", "content": "# 标题\n正文"}}
+	ref := kernel.ObjectRef{Kind: kernel.KindDocument, NativeID: "wikSAMPLE", Source: kernel.SourceDocs}
+	if relations := (&Provider{spec: spec}).parseRelations(kernel.ProviderExpandRequest{Ref: ref}, data); len(relations) != 0 {
+		t.Fatalf("relations=%+v", relations)
+	}
+}
+
+func TestCalendarFetchArgsAcceptCompoundIDWithoutURL(t *testing.T) {
+	args, err := calendarFetchArgs(kernel.ProviderFetchRequest{Ref: kernel.ObjectRef{NativeID: "cal_sample/evt_sample"}})
+	if err != nil || len(args) != 5 || args[4] != `{"calendar_id":"cal_sample","event_id":"evt_sample"}` {
+		t.Fatalf("args=%v err=%v", args, err)
+	}
+	if _, err := calendarFetchArgs(kernel.ProviderFetchRequest{Ref: kernel.ObjectRef{NativeID: "evt_sample"}}); err == nil {
+		t.Fatal("event id without calendar must be rejected")
+	}
+}

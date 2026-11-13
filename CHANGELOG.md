@@ -22,12 +22,19 @@
 - 按 lark-cli 1.0.100 的实测输出结构补齐字段：docs 标题与摘要取 `title_highlighted`、`summary_highlighted`，ID、URL、时间取 `result_meta`；minutes、meetings 标题取 `display_info`，摘要与链接取 `meta_data`；people 标题取 `localized_name`；mail 时间取 `date`；calendar 时间取 `start.date_time`。此前这些来源的标题在真实搜索中全部为空。字段声明支持点号路径，并去掉 `<h>`、`<hb>`、`<b>`、`<em>` 高亮标签
 - 读取卡片消息（`interactive`）时提取 `elements` 中的正文；只含图片的卡片按"正文已读取、内容为空"返回，不再以 `version_incompatible` 失败
 - `map_fetch` 跳过没有可读取 Projection 的候选（如 docs 搜索命中的多维表格）并由后续候选补位，且只请求候选声明可读取的 Projection；与 research 的 rerank 补读规则一致。此前这类候选会让读取节点和整个 research 变成 `partial`
+- lark-cli calendar 搜索结果可以读取：日程条目缺少 `calendar_id` 时使用响应中页级的 `calendar_id`，读取命令先解析 `calendar_id/event_id` 复合 ID；此前真实搜索得到的日程都因缺少 `calendar_id` 读取失败
+- 单聊消息（无 `chat_name`）以 `sender.name` 作标题，与 direct OpenAPI 适配器一致
+- docs 读取不再把文档自身的 `document_id`（wiki 节点背后的 docx）当成 `message.links_to_document` 关系
 - 来源第一页成功、后续翻页失败时，来源状态记为 `partial` 并保留错误，统计中不再算作失败来源；此前会显示为 `deadline_exceeded` 等失败状态，尽管已返回结果
 - lark-cli 输出的无时区时间（messages `2006-01-02 15:04`、tasks `2006-01-02 15:04:05`）按本机时区解析；此前 messages 时间无法解析，tasks 时间按 UTC 解析
 - lark-cli 字段抽取在顶层找不到字段时逐层查找，同一层按字段优先级、同级对象按 key 排序，结果不再随 map 遍历顺序变化
 
 - lark-cli 输出解析现在只在 stdout/stderr 合计存在唯一、行边界完整且带显式 `ok` 的 envelope 时容忍诊断文本；多 JSON、失败流冲突、混合 raw JSON 与非零退出成功 envelope 继续 fail closed
 - 将 GitHub Actions `run:` block 的 ShellCheck 改为带硬超时的独立门禁，再运行关闭内置 ShellCheck 的 actionlint v1.7.7，避免该版本在 Darwin 上向未启动 reader 的 stdin pipe 写入较大脚本时死锁
+
+### Documentation
+
+- README 的真实只读验证记录更新为 2026-11-13 在 lark-cli 1.0.100 上的结果，第 16 节改为引用该记录
 
 ### Verification
 
