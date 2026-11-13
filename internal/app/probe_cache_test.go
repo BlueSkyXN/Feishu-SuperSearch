@@ -3,12 +3,16 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestBuildReusesStoredProbeUntilExecutableChanges(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX executable")
+	}
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls.log")
 	exe := filepath.Join(dir, "lark-cli")

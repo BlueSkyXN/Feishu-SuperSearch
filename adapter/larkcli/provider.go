@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -358,10 +359,7 @@ func (p *Provider) parsePage(data any, env Envelope, identity kernel.Identity) k
 	}
 	for i, item := range items {
 		if pageCalendarID != "" && findString(item, []string{"calendar_id"}) == "" {
-			withCalendar := make(map[string]any, len(item)+1)
-			for k, v := range item {
-				withCalendar[k] = v
-			}
+			withCalendar := maps.Clone(item)
 			withCalendar["calendar_id"] = pageCalendarID
 			item = withCalendar
 		}
