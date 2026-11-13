@@ -144,6 +144,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	defer app.Close()
 	identity := clicore.ParseIdentity(g.profile, g.identity)
+	// serve and mcp take identity from each request; requests that omit it use
+	// the startup --profile/--as.
+	app.DefaultIdentity = identity
 
 	switch cmd {
 	case "providers":
@@ -511,6 +514,7 @@ func cmdPlan(ctx context.Context, a *appcore.App, format string, args []string, 
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return err
 	}
+	plan.Identity = a.RequestIdentity(plan.Identity)
 	events, results, err := a.Engine.Execute(ctx, plan)
 	if err != nil {
 		return err

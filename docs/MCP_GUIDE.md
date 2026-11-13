@@ -12,6 +12,8 @@ sfs --backend mock mcp
 sfs --backend larkcli --profile work --as user mcp
 ```
 
+`--profile`、`--as` 是工具调用的默认身份：调用参数省略 `identity` 或其中的 `profile`、`mode` 时，使用启动时的值；显式传入的字段以调用参数为准。
+
 MCP 使用 stdio：
 
 - stdin：MCP 请求；

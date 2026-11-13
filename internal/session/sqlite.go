@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -68,8 +69,67 @@ type SQLiteStore struct {
 	filesystemPath string
 	ttl            time.Duration
 
+	liveMu sync.Mutex
+	live   map[string]*liveRecord
+
 	closeOnce sync.Once
 	closeErr  error
+}
+
+// liveRecord is the in-process instance of one stored session. Callers in the
+// same process share one *Record, as with MemoryStore, so concurrent
+// operations on a session (for example parallel plan nodes) modify the same
+// object instead of saving copies that overwrite each other. digest is the
+// hash of the snapshot this process last read or wrote; a different digest in
+// the database means another process saved the session, and Get reloads it.
+// mu serializes Get and Save for the session so that a later save always
+// writes a snapshot that contains the earlier changes.
+type liveRecord struct {
+	mu     sync.Mutex
+	record *Record
+	digest [sha256.Size]byte
+}
+
+func (s *SQLiteStore) liveEntry(id string) *liveRecord {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	if s.live == nil {
+		s.live = map[string]*liveRecord{}
+	}
+	entry := s.live[id]
+	if entry == nil {
+		entry = &liveRecord{}
+		s.live[id] = entry
+	}
+	return entry
+}
+
+func (s *SQLiteStore) forget(id string, entry *liveRecord) {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	if entry == nil || s.live[id] == entry {
+		delete(s.live, id)
+	}
+}
+
+// forgetExpired drops in-process instances of sessions that have expired.
+func (s *SQLiteStore) forgetExpired(now time.Time) {
+	s.liveMu.Lock()
+	entries := make(map[string]*liveRecord, len(s.live))
+	for id, entry := range s.live {
+		entries[id] = entry
+	}
+	s.liveMu.Unlock()
+	for id, entry := range entries {
+		// Entries without a record are being loaded by Get, which removes them
+		// itself when the session does not exist.
+		entry.mu.Lock()
+		expired := entry.record != nil && !entry.record.ExpiresAt.After(now)
+		entry.mu.Unlock()
+		if expired {
+			s.forget(id, entry)
+		}
+	}
 }
 
 // NewSQLiteStore opens or creates a SQLite session database, applies all
@@ -333,6 +393,7 @@ func (s *SQLiteStore) Create(ctx context.Context, scope string) (*Record, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	s.forgetExpired(time.Now().UTC())
 	r := NewRecord(scope, s.ttl)
 	if err := s.Save(ctx, r); err != nil {
 		return nil, err
@@ -344,6 +405,9 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Record, error) {
 	if !sessionIDPattern.MatchString(id) {
 		return nil, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "invalid session id"}
 	}
+	entry := s.liveEntry(id)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
 	var (
 		scope      string
 		createdAt  int64
@@ -355,33 +419,44 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Record, error) {
 		FROM sessions
 		WHERE id = ?`, id).Scan(&scope, &createdAt, &expiresAt, &snapshotJS)
 	if errors.Is(err, sql.ErrNoRows) {
+		s.forget(id, entry)
 		return nil, sessionNotFound("session not found")
 	}
 	if err != nil {
 		return nil, wrapSQLiteError(SQLiteErrorRead, "get", s.path, err)
 	}
 	if expiresAt <= time.Now().UTC().UnixNano() {
+		s.forget(id, entry)
 		if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id); err != nil {
 			return nil, wrapSQLiteError(SQLiteErrorWrite, "delete_expired", s.path, err)
 		}
 		return nil, sessionNotFound("session expired")
 	}
 
+	digest := sha256.Sum256(snapshotJS)
+	if entry.record != nil && entry.digest == digest {
+		return entry.record, nil
+	}
 	snapshot, err := decodeStoredSnapshot(id, scope, createdAt, expiresAt, snapshotJS)
 	if err != nil {
 		return nil, wrapSQLiteError(SQLiteErrorCorrupt, "decode_snapshot", s.path, err)
 	}
-	return Restore(snapshot), nil
+	entry.record = Restore(snapshot)
+	entry.digest = digest
+	return entry.record, nil
 }
 
 func (s *SQLiteStore) Save(ctx context.Context, r *Record) error {
 	if r == nil {
 		return &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "nil session"}
 	}
-	snapshot := r.Snapshot(true)
-	if !sessionIDPattern.MatchString(snapshot.ID) {
+	if !sessionIDPattern.MatchString(r.ID) {
 		return &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "invalid session id"}
 	}
+	entry := s.liveEntry(r.ID)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	snapshot := r.Snapshot(true)
 	if snapshot.CreatedAt.IsZero() || snapshot.ExpiresAt.IsZero() || !snapshot.ExpiresAt.After(snapshot.CreatedAt) {
 		return &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "invalid session timestamps"}
 	}
@@ -409,6 +484,8 @@ func (s *SQLiteStore) Save(ctx context.Context, r *Record) error {
 	if err != nil {
 		return wrapSQLiteError(SQLiteErrorWrite, "save", s.path, err)
 	}
+	entry.record = r
+	entry.digest = sha256.Sum256(b)
 	if err := s.secureFiles(); err != nil {
 		return wrapSQLiteError(SQLiteErrorWrite, "secure_save_files", s.path, err)
 	}
@@ -419,6 +496,7 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	if !sessionIDPattern.MatchString(id) {
 		return &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "invalid session id"}
 	}
+	s.forget(id, nil)
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id); err != nil {
 		return wrapSQLiteError(SQLiteErrorWrite, "delete", s.path, err)
 	}
@@ -468,6 +546,7 @@ func (s *SQLiteStore) List(ctx context.Context) ([]kernel.SessionSnapshot, error
 // CleanupExpired deletes all sessions whose expiry is at or before the current
 // UTC time and returns the number of removed rows.
 func (s *SQLiteStore) CleanupExpired(ctx context.Context) (int64, error) {
+	s.forgetExpired(time.Now().UTC())
 	now := time.Now().UTC().UnixNano()
 	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at <= ?", now)
 	if err != nil {

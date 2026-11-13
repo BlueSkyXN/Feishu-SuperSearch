@@ -30,6 +30,9 @@ type App struct {
 	Reranker ai.Reranker
 	Answerer ai.Answerer
 	Backend  string
+	// DefaultIdentity is the identity chosen at startup with --profile/--as.
+	// RequestIdentity uses it for requests that leave profile or mode empty.
+	DefaultIdentity kernel.Identity
 }
 
 type providerRegistration struct {
@@ -236,6 +239,22 @@ func buildAIClient(cfg Config, feature AIFeatureConfig) (*openaiadapter.Client, 
 	}
 	client, err := openaiadapter.NewClient(openaiadapter.ClientConfig{BaseURL: cfg.AI.BaseURL, APIKey: cfg.AIAPIKey(), Timeout: cfg.AIFeatureTimeout(feature), MaxInputBytes: cfg.AI.MaxInputBytes, MaxResponseBytes: cfg.AI.MaxResponseBytes, JSONSchema: cfg.AI.JSONSchema})
 	return client, model, err
+}
+
+// RequestIdentity returns the identity to use for a request from the CLI, HTTP
+// or MCP. An empty profile or mode is taken from DefaultIdentity. The scope key
+// is cleared so that it is always derived from profile and mode, never supplied
+// by the caller.
+func (a *App) RequestIdentity(id kernel.Identity) kernel.Identity {
+	id.ScopeKey = ""
+	id.Profile = strings.TrimSpace(id.Profile)
+	if id.Profile == "" {
+		id.Profile = a.DefaultIdentity.Profile
+	}
+	if id.Mode == "" {
+		id.Mode = a.DefaultIdentity.Mode
+	}
+	return id
 }
 
 func (a *App) ApplyDefaults(req kernel.SearchRequest) kernel.SearchRequest {

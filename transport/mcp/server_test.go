@@ -146,3 +146,47 @@ func TestMCPRejectsUnknownToolArguments(t *testing.T) {
 		t.Fatalf("unknown arguments accepted: %s", out.String())
 	}
 }
+
+func TestMCPUsesStartupIdentityAndAcceptsMeta(t *testing.T) {
+	cfg := appcore.DefaultConfig()
+	cfg.Backend = "mock"
+	cfg.Storage = appcore.StorageConfig{Type: "memory", TTL: "45m"}
+	a, err := appcore.Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.DefaultIdentity = kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目 延期","sources":["docs"]},"_meta":{"progressToken":"p1"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"feishu_search","arguments":{"query":"A 项目 延期","sources":["docs"],"identity":{"mode":"bot"}}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := New(a).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("responses=%d\n%s", len(lines), out.String())
+	}
+	want := []kernel.Identity{{Profile: "work", Mode: kernel.IdentityUser}, {Profile: "work", Mode: kernel.IdentityBot}}
+	for i, line := range lines {
+		var resp struct {
+			Result struct {
+				IsError           bool                  `json:"isError"`
+				StructuredContent kernel.SearchSnapshot `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error != nil || resp.Result.IsError || len(resp.Result.StructuredContent.Candidates) == 0 {
+			t.Fatalf("call %d failed: %s", i+1, line)
+		}
+		scope := want[i].Normalized().ScopeKey
+		if got := resp.Result.StructuredContent.Candidates[0].Ref.ScopeKey; got != scope {
+			t.Fatalf("call %d scope=%s want %s (%+v)", i+1, got, scope, want[i])
+		}
+	}
+}

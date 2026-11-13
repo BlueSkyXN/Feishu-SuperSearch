@@ -57,7 +57,7 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 	searchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
-	first := e.searchWave(searchCtx, rec, req, sources, nil, budget)
+	first := e.searchWave(searchCtx, rec, req, sources, nil, nil, budget)
 	all := collectCandidates(first)
 	runs := runsFromResults(first)
 	frontiers := frontiersFromResults(first)
@@ -74,7 +74,7 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 			for _, s := range moreSources {
 				cursors[s] = frontiers[s].Cursor
 			}
-			next := e.searchWave(searchCtx, rec, req, moreSources, cursors, budget)
+			next := e.searchWave(searchCtx, rec, req, moreSources, cursors, rankOffsets(runs, moreSources), budget)
 			if len(next) == 0 {
 				break
 			}
@@ -169,7 +169,7 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 		if len(active) == 0 {
 			break
 		}
-		res := e.searchWave(continueCtx, rec, base, active, cursors, budget)
+		res := e.searchWave(continueCtx, rec, base, active, cursors, rankOffsets(runs, active), budget)
 		all = append(all, collectCandidates(res)...)
 		mergeRuns(runs, res)
 		mergeFrontiers(frontiers, res)
@@ -193,7 +193,10 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	return snapshot, nil
 }
 
-func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel.SearchRequest, sources []kernel.SourceID, cursors map[kernel.SourceID]string, budget budgetctl.Account) []sourcePageResult {
+// searchWave runs one page per source. offsets holds how many candidates each
+// source already returned in earlier pages; providers report page-local ranks
+// and the offset turns them into ranks within the whole result list.
+func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel.SearchRequest, sources []kernel.SourceID, cursors map[kernel.SourceID]string, offsets map[kernel.SourceID]int, budget budgetctl.Account) []sourcePageResult {
 	sem := make(chan struct{}, e.cfg.GlobalConcurrency)
 	ch := make(chan sourcePageResult, len(sources))
 	var wg sync.WaitGroup
@@ -204,7 +207,7 @@ func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ch <- e.searchOne(ctx, rec, req, source, cursors[source], budget)
+			ch <- e.searchOne(ctx, rec, req, source, cursors[source], offsets[source], budget)
 		}()
 	}
 	wg.Wait()
@@ -216,7 +219,7 @@ func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel
 	sort.Slice(out, func(i, j int) bool { return out[i].source < out[j].source })
 	return out
 }
-func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.SearchRequest, source kernel.SourceID, cursor string, budget budgetctl.Account) sourcePageResult {
+func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.SearchRequest, source kernel.SourceID, cursor string, offset int, budget budgetctl.Account) sourcePageResult {
 	started := time.Now()
 	result := sourcePageResult{source: source, run: kernel.SourceRun{Source: source, Status: kernel.StatusFailed}}
 	p, ok := e.registry.ForOperation(source, kernel.OpSearch)
@@ -312,13 +315,35 @@ func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.
 		if c.NativeRank <= 0 {
 			c.NativeRank = i + 1
 		}
+		c.NativeRank += offset
+		if c.Provenance.SourceRank > 0 {
+			c.Provenance.SourceRank += offset
+		}
 		if len(c.DiscoveredBy) == 0 {
 			c.DiscoveredBy = []kernel.Discovery{{ProviderID: result.provider, Source: source, Rank: c.NativeRank, Score: c.NativeScore, Cursor: cursor}}
+		} else {
+			for j := range c.DiscoveredBy {
+				if c.DiscoveredBy[j].Rank <= 0 {
+					c.DiscoveredBy[j].Rank = c.NativeRank
+				} else {
+					c.DiscoveredBy[j].Rank += offset
+				}
+			}
 		}
 		e.addEvent(rec, kernel.EventCandidateUpsert, source, map[string]any{"candidate": *c})
 	}
 	e.addEvent(rec, kernel.EventSourceCompleted, source, map[string]any{"run": result.run})
 	return result
+}
+
+// rankOffsets returns, for each source, the number of candidates it returned in
+// earlier pages of the same search.
+func rankOffsets(runs map[kernel.SourceID]kernel.SourceRun, sources []kernel.SourceID) map[kernel.SourceID]int {
+	out := make(map[kernel.SourceID]int, len(sources))
+	for _, s := range sources {
+		out[s] = runs[s].HitCount
+	}
+	return out
 }
 
 func collectCandidates(results []sourcePageResult) []kernel.Candidate {

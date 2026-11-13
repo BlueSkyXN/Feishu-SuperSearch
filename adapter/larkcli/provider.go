@@ -408,8 +408,8 @@ func findRecordMatrix(value any, depth int) map[string]any {
 				return current
 			}
 		}
-		for _, child := range current {
-			if found := findRecordMatrix(child, depth+1); found != nil {
+		for _, k := range sortedKeys(current) {
+			if found := findRecordMatrix(current[k], depth+1); found != nil {
 				return found
 			}
 		}
@@ -734,42 +734,73 @@ func toMapSlice(v any) []map[string]any {
 	return nil
 }
 
+// findString returns the first non-empty value for keys, searching m level by
+// level: all objects at one depth are checked, in key-priority order, before
+// any deeper object. Sibling objects are visited in sorted key order, so the
+// result does not depend on Go's random map iteration order.
 func findString(m map[string]any, keys []string) string {
-	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			switch x := v.(type) {
-			case string:
-				if strings.TrimSpace(x) != "" {
-					return x
-				}
-			case json.Number:
-				return x.String()
-			case float64:
-				return strconv.FormatFloat(x, 'f', -1, 64)
-			case map[string]any:
-				if s := findString(x, []string{"name", "text", "content", "value", "url"}); s != "" {
+	for level := []map[string]any{m}; len(level) > 0; level = childObjects(level) {
+		for _, k := range keys {
+			for _, object := range level {
+				if s, ok := stringField(object, k); ok {
 					return s
 				}
 			}
 		}
 	}
-	for _, v := range m {
-		switch child := v.(type) {
-		case map[string]any:
-			if s := findString(child, keys); s != "" {
-				return s
-			}
-		case []any:
-			for _, item := range child {
-				if object, ok := item.(map[string]any); ok {
-					if s := findString(object, keys); s != "" {
-						return s
+	return ""
+}
+
+func stringField(m map[string]any, key string) (string, bool) {
+	v, ok := m[key]
+	if !ok {
+		return "", false
+	}
+	switch x := v.(type) {
+	case string:
+		if strings.TrimSpace(x) != "" {
+			return x, true
+		}
+	case json.Number:
+		return x.String(), true
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64), true
+	case map[string]any:
+		if s := findString(x, []string{"name", "text", "content", "value", "url"}); s != "" {
+			return s, true
+		}
+	}
+	return "", false
+}
+
+// childObjects returns the objects directly below level: object values and
+// objects inside array values, in sorted key order.
+func childObjects(level []map[string]any) []map[string]any {
+	var next []map[string]any
+	for _, object := range level {
+		for _, k := range sortedKeys(object) {
+			switch child := object[k].(type) {
+			case map[string]any:
+				next = append(next, child)
+			case []any:
+				for _, item := range child {
+					if nested, ok := item.(map[string]any); ok {
+						next = append(next, nested)
 					}
 				}
 			}
 		}
 	}
-	return ""
+	return next
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func findBool(m map[string]any, keys []string) bool {
@@ -915,23 +946,16 @@ func extractSummary(m map[string]any) *kernel.NativeSummary {
 	return &s
 }
 
+// findAny returns the value of key from the shallowest object that has it,
+// using the same deterministic order as findString.
 func findAny(m map[string]any, key string) any {
 	if v, ok := m[key]; ok {
 		return v
 	}
-	for _, v := range m {
-		switch child := v.(type) {
-		case map[string]any:
-			if found := findAny(child, key); found != nil {
-				return found
-			}
-		case []any:
-			for _, item := range child {
-				if object, ok := item.(map[string]any); ok {
-					if found := findAny(object, key); found != nil {
-						return found
-					}
-				}
+	for level := childObjects([]map[string]any{m}); len(level) > 0; level = childObjects(level) {
+		for _, object := range level {
+			if v := object[key]; v != nil {
+				return v
 			}
 		}
 	}
@@ -960,7 +984,8 @@ func findAllStrings(m map[string]any, keys []string) map[string][]string {
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
-			for k, val := range x {
+			for _, k := range sortedKeys(x) {
+				val := x[k]
 				if wanted[k] {
 					switch y := val.(type) {
 					case string:

@@ -111,10 +111,10 @@ sfs --config ~/.config/sfs/config.json providers
 
 - `executable` 可以是绝对路径；
 - `profile_args` 在每次调用时追加，适合特殊 CLI 包装器；
-- `timeout` 是子进程时限；
+- `timeout` 是子进程时限。一次 Search 或 Query 同时受 `runtime.provider_timeout` 限制，实际生效的是两者中较小的值，搜索超时时先调大 `runtime.provider_timeout`；
 - 输出上限用于防止异常 Provider 占用无限内存。
 
-身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。
+身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。`sfs serve` 和 `sfs mcp` 中，请求省略的 `profile`、`mode` 取启动时的 `--profile`、`--as`。
 
 ## 7. Direct OpenAPI
 

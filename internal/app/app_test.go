@@ -399,3 +399,20 @@ func strconvQuote(value string) string {
 	b, _ := json.Marshal(value)
 	return string(b)
 }
+
+func TestRequestIdentityFillsOnlyMissingFields(t *testing.T) {
+	a := &App{DefaultIdentity: kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}}
+	cases := []struct {
+		in, want kernel.Identity
+	}{
+		{kernel.Identity{}, kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}},
+		{kernel.Identity{Mode: kernel.IdentityBot}, kernel.Identity{Profile: "work", Mode: kernel.IdentityBot}},
+		{kernel.Identity{Profile: " other "}, kernel.Identity{Profile: "other", Mode: kernel.IdentityUser}},
+		{kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto, ScopeKey: "forged"}, kernel.Identity{Profile: "other", Mode: kernel.IdentityAuto}},
+	}
+	for _, c := range cases {
+		if got := a.RequestIdentity(c.in); got != c.want {
+			t.Fatalf("RequestIdentity(%+v)=%+v want %+v", c.in, got, c.want)
+		}
+	}
+}

@@ -70,6 +70,9 @@ type tool struct {
 type toolCall struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+	// Meta is the request metadata reserved by MCP (for example progressToken).
+	// It is accepted and ignored so that clients sending it are not rejected.
+	Meta json.RawMessage `json:"_meta,omitempty"`
 }
 
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -164,7 +167,7 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: err.Error()}
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		req = s.App.ApplyDefaults(req)
 		return s.App.Engine.Search(ctx, req)
 	case "feishu_continue":
@@ -172,35 +175,35 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Continue(ctx, req)
 	case "feishu_query":
 		var req kernel.QueryRequest
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Query(ctx, req)
 	case "feishu_fetch":
 		var req kernel.FetchBatchRequest
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Fetch(ctx, req)
 	case "feishu_expand":
 		var req kernel.ExpandRequest
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Expand(ctx, req)
 	case "feishu_resolve":
 		var req kernel.ResolveRequest
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		refs, err := s.App.Engine.Resolve(ctx, req)
 		return map[string]any{"refs": refs}, err
 	case "feishu_research":
@@ -208,7 +211,7 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		if !req.Deep {
 			req.Deep = true
 		}
@@ -218,7 +221,7 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		req.Deep = true
 		service := askcore.Service{Research: research.Service{Kernel: s.App.Engine, Planner: s.App.Planner, Reranker: s.App.Reranker}, Answerer: s.App.Answerer}
 		return service.Run(ctx, askcore.Request{UserRequest: req})
@@ -230,7 +233,7 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 		if err := decodeStrict(call.Arguments, &req); err != nil {
 			return nil, err
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Session(ctx, req.SessionID, req.Identity)
 	case "feishu_capabilities":
 		var req kernel.CapabilityRequest
@@ -239,7 +242,7 @@ func (s *Server) callTool(ctx context.Context, call toolCall) (any, error) {
 				return nil, err
 			}
 		}
-		req.Identity.ScopeKey = ""
+		req.Identity = s.App.RequestIdentity(req.Identity)
 		return s.App.Engine.Capabilities(ctx, req)
 	default:
 		return nil, &kernel.ErrorDetail{Type: kernel.ErrUnsupported, Message: "unknown tool: " + call.Name}

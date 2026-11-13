@@ -362,3 +362,27 @@ func countingProviderApp(t *testing.T, searchProvider *countingSearchProvider) *
 	cfg.Storage = appcore.StorageConfig{Type: "memory", TTL: "45m"}
 	return &appcore.App{Config: cfg, Registry: registry, Engine: eng, Planner: rulesplanner.Planner{}, Backend: "test"}
 }
+
+func TestHTTPUsesStartupIdentityWhenRequestOmitsIt(t *testing.T) {
+	a := testApp(t)
+	a.DefaultIdentity = kernel.Identity{Profile: "work", Mode: kernel.IdentityUser}
+	h := New(a).Handler()
+	search := postJSON(t, h, "/v1/search", kernel.SearchRequest{Query: "A 项目", Sources: []kernel.SourceID{kernel.SourceDocs}})
+	if search.Code != http.StatusOK {
+		t.Fatalf("search=%d %s", search.Code, search.Body.String())
+	}
+	var snapshot kernel.SearchSnapshot
+	if err := json.Unmarshal(search.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	scope := a.DefaultIdentity.Normalized().ScopeKey
+	if len(snapshot.Candidates) == 0 || snapshot.Candidates[0].Ref.ScopeKey != scope {
+		t.Fatalf("candidates=%+v want scope %s", snapshot.Candidates, scope)
+	}
+	// Session endpoints without identity query parameters resolve to the same scope.
+	get := httptest.NewRecorder()
+	h.ServeHTTP(get, loopbackRequest(http.MethodGet, "/v1/sessions/"+snapshot.SessionID, nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("default-identity get=%d %s", get.Code, get.Body.String())
+	}
+}

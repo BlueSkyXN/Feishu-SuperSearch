@@ -166,7 +166,6 @@ export const api = {
       body: JSON.stringify({
         query,
         sources,
-        identity: { mode: "auto" },
         limit: 40,
         limit_per_source: limitPerSource,
         budget: { max_pages_per_source: pagination === "none" ? 1 : 2 },
@@ -178,7 +177,6 @@ export const api = {
 	return streamRequest<ResearchResult>("/v1/research", {
 		query,
 		sources,
-		identity: { mode: "auto" },
 		deep: true,
 		fetch_top_k: 8,
 	}, options);
@@ -187,7 +185,6 @@ export const api = {
 	return streamRequest<AskResult>("/v1/ask", {
 		query,
 		sources,
-		identity: { mode: "auto" },
 		deep: true,
 		fetch_top_k: 8,
 	}, options);
@@ -212,7 +209,6 @@ export const api = {
       signal,
       body: JSON.stringify({
         session_id: sessionID,
-        identity: { mode: "auto" },
         items: [{ ref: candidate.ref, projection }],
       }),
     });

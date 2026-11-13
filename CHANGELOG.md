@@ -4,11 +4,18 @@
 
 ### Fixed
 
+- `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段
+- 翻页结果的来源内名次改由 Kernel 统一加页偏移，第 2 页不再与第 1 页同名次、同分并穿插排序；Provider 契约改为返回页内名次，mock Provider 同步调整
+- MCP `tools/call` 接受协议保留的 `_meta` 字段，不再以 `-32602` 拒绝带 progressToken 等元数据的请求
+- SQLite Session 存储在同一进程内共享一个 Session 实例，并串行化同一 Session 的读写；计划中并行节点写同一 Session 时不再互相覆盖。其他进程保存过的 Session 会在下次读取时重新加载
+- lark-cli 字段抽取在顶层找不到字段时逐层查找，同一层按字段优先级、同级对象按 key 排序，结果不再随 map 遍历顺序变化
+
 - lark-cli 输出解析现在只在 stdout/stderr 合计存在唯一、行边界完整且带显式 `ok` 的 envelope 时容忍诊断文本；多 JSON、失败流冲突、混合 raw JSON 与非零退出成功 envelope 继续 fail closed
 - 将 GitHub Actions `run:` block 的 ShellCheck 改为带硬超时的独立门禁，再运行关闭内置 ShellCheck 的 actionlint v1.7.7，避免该版本在 Darwin 上向未启动 reader 的 stdin pipe 写入较大脚本时死锁
 
 ### Verification
 
+- 增加跨页名次、启动身份默认值（MCP、HTTP）、MCP `_meta`、SQLite 交错读写与跨进程重新加载、并行计划节点持久化、lark-cli 嵌套字段确定性的回归测试
 - 增加 lark-cli 混合输出、歧义输出和非零退出语义回归测试
 - 增加 workflow shell 提取、表达式脱敏、ShellCheck 大 stdin、超时、缺失 binary、异常退出及 shell 优先级测试
 
