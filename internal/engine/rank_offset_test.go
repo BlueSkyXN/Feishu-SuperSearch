@@ -96,3 +96,36 @@ func assertRankOrder(t *testing.T, candidates []kernel.Candidate, n int) {
 		}
 	}
 }
+
+// failingSecondPageProvider returns one page with a cursor and fails the next.
+type failingSecondPageProvider struct{ pagedSearchProvider }
+
+func (p *failingSecondPageProvider) Search(ctx context.Context, req kernel.ProviderSearchRequest) (kernel.CandidatePage, error) {
+	if req.Cursor != "" {
+		return kernel.CandidatePage{}, &kernel.ErrorDetail{Type: kernel.ErrDeadlineExceeded, Message: "page 2 timed out"}
+	}
+	return p.pagedSearchProvider.Search(ctx, req)
+}
+
+func TestSearchMarksSourcePartialWhenLaterPageFails(t *testing.T) {
+	registry := provider.NewRegistry()
+	if err := registry.Register(&failingSecondPageProvider{pagedSearchProvider{pageSize: 3, total: 9}}, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	snap, err := e.Search(context.Background(), kernel.SearchRequest{Query: "q", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: kernel.Identity{Mode: kernel.IdentityAuto}, Limit: 20, LimitPerSource: 3, Strategy: kernel.SearchStrategy{Pagination: "fixed"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Candidates) != 3 || len(snap.Sources) != 1 {
+		t.Fatalf("snapshot=%+v", snap)
+	}
+	run := snap.Sources[0]
+	if run.Status != kernel.StatusPartial || run.Error == nil || run.Error.Type != kernel.ErrDeadlineExceeded {
+		t.Fatalf("source run=%+v", run)
+	}
+	if !snap.Partial || snap.Stats.SourcesFailed != 0 || snap.Stats.SourcesCompleted != 1 {
+		t.Fatalf("partial=%v stats=%+v", snap.Partial, snap.Stats)
+	}
+}

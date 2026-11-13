@@ -384,13 +384,18 @@ func frontiersFromResults(results []sourcePageResult) map[kernel.SourceID]kernel
 func mergeRuns(m map[kernel.SourceID]kernel.SourceRun, results []sourcePageResult) {
 	for _, r := range results {
 		old := m[r.source]
+		earlierHits := old.HitCount
 		old.ProviderID = r.run.ProviderID
 		old.Source = r.source
 		old.Pages += r.run.Pages
 		old.HitCount += r.run.HitCount
 		old.ElapsedMS += r.run.ElapsedMS
 		if r.run.Status == kernel.StatusFailed || r.run.Status == kernel.StatusMissingScope || r.run.Status == kernel.StatusDeadline {
+			// A failed later page does not undo the results of earlier pages.
 			old.Status = r.run.Status
+			if earlierHits > 0 {
+				old.Status = kernel.StatusPartial
+			}
 			old.Error = r.run.Error
 		} else if old.Status == "" || old.Status == kernel.StatusEmpty {
 			old.Status = r.run.Status
@@ -457,14 +462,21 @@ func aggregateSearchFailure(runs map[kernel.SourceID]kernel.SourceRun) *kernel.E
 	return &kernel.ErrorDetail{Type: typeOf, Message: "all search sources failed", Retryable: retryable, Details: details}
 }
 
+// partialFromRuns reports whether any source fell short and how many sources
+// failed outright; a partial source returned results and is not counted as
+// failed.
 func partialFromRuns(m map[kernel.SourceID]kernel.SourceRun) (bool, int) {
-	failed := 0
+	partial, failed := false, 0
 	for _, r := range m {
-		if r.Status != kernel.StatusOK && r.Status != kernel.StatusEmpty {
+		if r.Status == kernel.StatusOK || r.Status == kernel.StatusEmpty {
+			continue
+		}
+		partial = true
+		if r.Status != kernel.StatusPartial {
 			failed++
 		}
 	}
-	return failed > 0, failed
+	return partial, failed
 }
 func chooseNextSources(req kernel.SearchRequest, selected []kernel.Candidate, last []sourcePageResult, frontiers map[kernel.SourceID]kernel.Continuation) []kernel.SourceID {
 	if req.Strategy.Pagination == "fixed" || req.Strategy.Pagination == "all" {
