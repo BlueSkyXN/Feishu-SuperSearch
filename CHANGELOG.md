@@ -22,6 +22,7 @@
 - 按 lark-cli 1.0.100 的实测输出结构补齐字段：docs 标题与摘要取 `title_highlighted`、`summary_highlighted`，ID、URL、时间取 `result_meta`；minutes、meetings 标题取 `display_info`，摘要与链接取 `meta_data`；people 标题取 `localized_name`；mail 时间取 `date`；calendar 时间取 `start.date_time`。此前这些来源的标题在真实搜索中全部为空。字段声明支持点号路径，并去掉 `<h>`、`<hb>`、`<b>`、`<em>` 高亮标签
 - 读取卡片消息（`interactive`）时提取 `elements` 中的正文；只含图片的卡片按"正文已读取、内容为空"返回，不再以 `version_incompatible` 失败
 - `map_fetch` 跳过没有可读取 Projection 的候选（如 docs 搜索命中的多维表格）并由后续候选补位，且只请求候选声明可读取的 Projection；与 research 的 rerank 补读规则一致。此前这类候选会让读取节点和整个 research 变成 `partial`
+- Web 开发与测试依赖按 `npm audit fix` 升级：vite 8.2.0 → 8.3.8、undici 8.9.0 → 8.12.4，修复 2026-07 之后公布的 4 个 high、2 个 moderate 通告（`npm audit` 门禁自 2026-10 起在 `main` 的定时任务中失败）；`package.json` 未变，嵌入的前端产物随 vite 版本重新生成
 - lark-cli calendar 搜索结果可以读取：日程条目缺少 `calendar_id` 时使用响应中页级的 `calendar_id`，读取命令先解析 `calendar_id/event_id` 复合 ID；此前真实搜索得到的日程都因缺少 `calendar_id` 读取失败
 - 单聊消息（无 `chat_name`）以 `sender.name` 作标题，与 direct OpenAPI 适配器一致
 - docs 读取不再把文档自身的 `document_id`（wiki 节点背后的 docx）当成 `message.links_to_document` 关系
