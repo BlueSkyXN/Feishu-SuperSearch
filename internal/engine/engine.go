@@ -106,7 +106,8 @@ func (e *Engine) Capabilities(ctx context.Context, req kernel.CapabilityRequest)
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			descriptor := p.Descriptor()
-			capability := kernel.ProviderCapability{Descriptor: descriptor, Status: kernel.StatusOK, Version: descriptor.Version}
+			observed := out.GeneratedAt
+			capability := kernel.ProviderCapability{Descriptor: descriptor, Status: kernel.StatusOK, Version: descriptor.Version, ObservedAt: &observed}
 			if checker, ok := p.(kernel.HealthChecker); ok {
 				probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 				version, err := checker.Health(probeCtx, req.Identity)

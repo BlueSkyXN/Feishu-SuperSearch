@@ -180,9 +180,11 @@ func Build(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("unsupported storage type %q", cfg.Storage.Type)
 	}
 	eng := engine.New(reg, store, engine.Config{GlobalConcurrency: cfg.Runtime.GlobalConcurrency, ProviderTimeout: cfg.ProviderTimeout(), SessionTTL: cfg.SessionTTL()})
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 8*time.Second)
-	_, _ = eng.Capabilities(probeCtx, kernel.CapabilityRequest{Probe: true})
-	probeCancel()
+	if capabilityProbeNeeded(eng, cfg.LarkCLI.Executable, time.Now()) {
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		_, _ = eng.Capabilities(probeCtx, kernel.CapabilityRequest{Probe: true})
+		probeCancel()
+	}
 	var (
 		pl       planner.Planner
 		reranker ai.Reranker

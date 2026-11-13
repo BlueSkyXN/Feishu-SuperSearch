@@ -8,6 +8,8 @@
 - `sfs serve`、`sfs mcp` 启动时显式给出的 `--profile`、`--as` 会限定请求可用的身份；请求要求其他值时返回 `identity_required`（`subtype=identity_pinned`）。未显式给出的字段保持按请求选择
 - research 与 ask 的默认预算统一放在 research 服务中（15 秒、36 次调用、每来源 2 页、读取数等于 `fetch_top_k`）；此前只有 CLI 使用这组值，HTTP 与 MCP 落到 8 秒、24 次调用
 
+- 启动时复用 SQLite 中 1 小时内、且只含兼容性结论的能力探测结果，lark-cli 可执行文件变化后重新探测；真实 lark-cli 1.0.100 下 `sfs sessions list` 从约 0.9 秒降到约 0.01 秒（首次启动仍需探测）。能力快照新增 `observed_at` 字段
+
 ### Fixed
 
 - `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段

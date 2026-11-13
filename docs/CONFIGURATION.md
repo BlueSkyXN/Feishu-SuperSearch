@@ -365,4 +365,4 @@ sfs --config config.example.json providers
 sfs --config config.example.json doctor
 ```
 
-程序启动时会执行 capability handshake 并缓存结果；`providers` 读取当前能力，`doctor` 使用 `probe=true` 再次探测。只对 `unsupported`/`version_incompatible` 在执行前选择已验证备用 Provider；权限和身份错误不会被静默 fallback 掩盖。
+程序启动时会执行 capability handshake，结果存入 SQLite。之后的启动在以下条件都满足时直接复用存储的结果、不再探测：每个 Provider 都有 1 小时内的结果，记录的失败只有 `unsupported`/`version_incompatible`，lark-cli 可执行文件（含指向它的符号链接）在上次探测后未修改。换用其他路径的 lark-cli 后，运行 `sfs doctor` 刷新。`providers` 读取当前能力，`doctor` 使用 `probe=true` 再次探测。只对 `unsupported`/`version_incompatible` 在执行前选择已验证备用 Provider；权限和身份错误不会被静默 fallback 掩盖。

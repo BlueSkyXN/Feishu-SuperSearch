@@ -632,8 +632,11 @@ func (s *SQLiteStore) LoadCapabilities(ctx context.Context) (kernel.CapabilitySn
 			}
 			return kernel.CapabilitySnapshot{}, wrapSQLiteError(SQLiteErrorCorrupt, "decode_capability", s.path, err)
 		}
-		snapshot.Providers = append(snapshot.Providers, capability)
 		when := time.Unix(0, observed).UTC()
+		if capability.ObservedAt == nil {
+			capability.ObservedAt = &when
+		}
+		snapshot.Providers = append(snapshot.Providers, capability)
 		if when.After(snapshot.GeneratedAt) {
 			snapshot.GeneratedAt = when
 		}
