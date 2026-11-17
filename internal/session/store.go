@@ -22,12 +22,15 @@ type Record struct {
 	Request   *kernel.SearchRequest
 
 	Candidates map[string]kernel.Candidate
-	Artifacts  map[string]kernel.Artifact
-	Relations  []kernel.Relation
-	Frontiers  map[kernel.SourceID]kernel.Continuation
-	SourceRuns []kernel.SourceRun
-	Budget     kernel.BudgetState
-	Events     []kernel.RetrievalEvent
+	// LatestSearchCandidateIDs scopes Continue to the most recent Search; see
+	// kernel.SessionSnapshot for the compatibility contract.
+	LatestSearchCandidateIDs []string
+	Artifacts                map[string]kernel.Artifact
+	Relations                []kernel.Relation
+	Frontiers                map[kernel.SourceID]kernel.Continuation
+	SourceRuns               []kernel.SourceRun
+	Budget                   kernel.BudgetState
+	Events                   []kernel.RetrievalEvent
 }
 
 func NewRecord(scope string, ttl time.Duration) *Record {
@@ -43,7 +46,8 @@ func Restore(s kernel.SessionSnapshot) *Record {
 	r := &Record{
 		ID: s.ID, ScopeKey: s.ScopeKey, CreatedAt: s.CreatedAt, ExpiresAt: s.ExpiresAt,
 		Request: s.Request, Candidates: map[string]kernel.Candidate{}, Artifacts: map[string]kernel.Artifact{},
-		Relations: append([]kernel.Relation(nil), s.Relations...), Frontiers: map[kernel.SourceID]kernel.Continuation{},
+		LatestSearchCandidateIDs: append([]string(nil), s.LatestSearchCandidateIDs...),
+		Relations:                append([]kernel.Relation(nil), s.Relations...), Frontiers: map[kernel.SourceID]kernel.Continuation{},
 		SourceRuns: append([]kernel.SourceRun(nil), s.SourceRuns...), Budget: s.Budget,
 		Events: append([]kernel.RetrievalEvent(nil), s.Events...),
 	}
@@ -95,8 +99,10 @@ func (r *Record) Snapshot(includeEvents bool) kernel.SessionSnapshot {
 	}
 	return kernel.SessionSnapshot{
 		ID: r.ID, ScopeKey: r.ScopeKey, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
-		Request: req, Candidates: candidates, Artifacts: artifacts,
-		Relations: append([]kernel.Relation(nil), r.Relations...), Frontiers: frontiers,
+		Request: req, Candidates: candidates,
+		LatestSearchCandidateIDs: append([]string(nil), r.LatestSearchCandidateIDs...),
+		Artifacts:                artifacts,
+		Relations:                append([]kernel.Relation(nil), r.Relations...), Frontiers: frontiers,
 		SourceRuns: append([]kernel.SourceRun(nil), r.SourceRuns...), Budget: r.Budget, Events: events,
 	}
 }

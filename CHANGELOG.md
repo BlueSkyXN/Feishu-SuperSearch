@@ -14,6 +14,10 @@
 
 ### Fixed
 
+- 同一 Session 并发 Fetch 同一对象的不同 projection 时，后完成的请求不再覆盖先完成者：写回改为与 Session 当前 Artifact 合并，正文与摘要并集保留，随后的并集请求可命中缓存。此前两次调用都成功但 Session 只剩最后写入的 projection
+- `Continue` 只返回最近一次 Search 及其续页的候选，不再把同一 Session 中更早搜索的对象混入当前结果（含切换来源、同来源换 query 的情况）；早先候选仍留在 Session 中供 Fetch/Expand 使用。Session 快照新增 `latest_search_candidate_ids` 记录归属，旧快照无此字段时按原有行为回退
+- 后续分页因调用预算耗尽或上游错误失败时：已取得的候选保留、来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后成功页，Continue 从失败页重试、不重复不跳过；成功重试后状态恢复 `ok`。此前会显示 `ok`、`partial=false` 并丢失续查游标
+- `internal/app` 探测缓存测试改为直接断言缓存复用判定：全仓并行测试负载下探测子进程可能超过 3 秒超时，此时重新探测是设计内行为，调用计数断言在满载机器上不可靠
 - `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段
 - 翻页结果的来源内名次改由 Kernel 统一加页偏移，第 2 页不再与第 1 页同名次、同分并穿插排序；Provider 契约改为返回页内名次，mock Provider 同步调整
 - MCP `tools/call` 接受协议保留的 `_meta` 字段，不再以 `-32602` 拒绝带 progressToken 等元数据的请求

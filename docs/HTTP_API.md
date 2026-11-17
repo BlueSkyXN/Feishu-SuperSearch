@@ -96,6 +96,8 @@ curl -sS http://127.0.0.1:3765/v1/search/continue \
 
 Session ID 不能跨 identity scope 继续；`scope_key` 是服务端派生字段，客户端传入值不会被信任。
 
+`Continue` 返回的是最近一次 Search 及其续页的候选，不会混入同一 Session 中更早搜索的对象；早先的对象仍保留在 Session 里，可用 Fetch/Expand 读取。后续分页因预算或上游错误失败时，响应保持 `partial` 并保留有效游标，下一次 Continue 从失败页重试。
+
 请求省略 `identity` 或其中的 `profile`、`mode` 时，使用 `sfs serve` 启动时 `--profile`、`--as` 的值。启动时显式给出的值不能被请求改成其他值，否则返回 403 `identity_required`（`subtype=identity_pinned`）；启动时未给出的字段可按请求选择。
 
 ## 5. Query
