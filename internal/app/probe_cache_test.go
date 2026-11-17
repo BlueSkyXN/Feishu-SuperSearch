@@ -9,76 +9,164 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlueSkyXN/Feishu-SuperSearch/internal/session"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 )
+
+// probeTestEnv is a larkcli-backed app fixture whose probe calls are logged
+// to a file, so cache reuse can be asserted on actual subprocess counts.
+type probeTestEnv struct {
+	t     *testing.T
+	dir   string
+	calls string
+	exe   string
+	cfg   Config
+}
+
+func newProbeTestEnv(t *testing.T) *probeTestEnv {
+	t.Helper()
+	dir := t.TempDir()
+	env := &probeTestEnv{t: t, dir: dir, calls: filepath.Join(dir, "calls.log"), exe: filepath.Join(dir, "lark-cli")}
+	script := "#!/bin/sh\necho \"$*\" >> '" + env.calls + "'\nif [ \"$1\" = \"--version\" ]; then echo 1.0.0-test; fi\nexit 0\n"
+	if err := os.WriteFile(env.exe, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(env.exe, past, past); err != nil {
+		t.Fatal(err)
+	}
+	env.cfg = DefaultConfig()
+	env.cfg.Backend = "larkcli"
+	env.cfg.LarkCLI.Executable = env.exe
+	env.cfg.Storage = StorageConfig{Type: "sqlite", Path: filepath.Join(dir, "sfs.db"), TTL: "45m"}
+	return env
+}
+
+func (e *probeTestEnv) build() *App {
+	e.t.Helper()
+	a, err := Build(e.cfg)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Cleanup(func() { _ = a.Close() })
+	return a
+}
+
+func (e *probeTestEnv) countCalls() int {
+	e.t.Helper()
+	raw, err := os.ReadFile(e.calls)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return strings.Count(string(raw), "\n")
+}
+
+// storedCapabilities reads what the session database holds without probing.
+func (e *probeTestEnv) storedCapabilities(t *testing.T) kernel.CapabilitySnapshot {
+	t.Helper()
+	a := e.build()
+	snapshot, err := a.Engine.Capabilities(context.Background(), kernel.CapabilityRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+// failOnTransientVerdicts reports, with evidence, any capability stored by
+// the first build that is not a settled compatibility verdict. A transient
+// entry legitimately forces a re-probe, so the strict reuse assertion below
+// is only valid once this returns nil.
+func failOnTransientVerdicts(t *testing.T, snapshot kernel.CapabilitySnapshot) {
+	t.Helper()
+	for _, capability := range snapshot.Providers {
+		if err := capability.Error; err != nil && !compatibilityVerdict(err) {
+			t.Fatalf("first probe stored a transient verdict for %s (%s: %s); evidence: %+v — this environment cannot assert strict cache reuse", capability.Descriptor.ID, err.Type, err.Message, capability)
+		}
+		for operation, operationCapability := range capability.Operations {
+			if err := operationCapability.Error; err != nil && !compatibilityVerdict(err) {
+				t.Fatalf("first probe stored a transient verdict for %s/%s (%s: %s); evidence: %+v — this environment cannot assert strict cache reuse", capability.Descriptor.ID, operation, err.Type, err.Message, operationCapability)
+			}
+		}
+	}
+}
 
 func TestBuildReusesStoredProbeUntilExecutableChanges(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test helper uses a POSIX executable")
 	}
-	dir := t.TempDir()
-	calls := filepath.Join(dir, "calls.log")
-	exe := filepath.Join(dir, "lark-cli")
-	script := "#!/bin/sh\necho \"$*\" >> '" + calls + "'\nif [ \"$1\" = \"--version\" ]; then echo 1.0.0-test; fi\nexit 0\n"
-	if err := os.WriteFile(exe, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	past := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(exe, past, past); err != nil {
-		t.Fatal(err)
-	}
-	cfg := DefaultConfig()
-	cfg.Backend = "larkcli"
-	cfg.LarkCLI.Executable = exe
-	cfg.Storage = StorageConfig{Type: "sqlite", Path: filepath.Join(dir, "sfs.db"), TTL: "45m"}
-	build := func() *App {
-		t.Helper()
-		a, err := Build(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = a.Close() })
-		return a
-	}
-	countCalls := func() int {
-		raw, err := os.ReadFile(calls)
-		if os.IsNotExist(err) {
-			return 0
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		return strings.Count(string(raw), "\n")
-	}
+	env := newProbeTestEnv(t)
 
-	build()
-	first := countCalls()
+	env.build()
+	first := env.countCalls()
 	if first == 0 {
 		t.Fatal("first start should probe lark-cli")
 	}
-	a := build()
-	// The reuse contract is about the cache decision, which is asserted
-	// directly: with valid stored verdicts and an unchanged executable the
-	// second start must not need a probe. Under a fully parallel `go test
-	// ./...` a probe subprocess can exceed its 3s timeout, which legitimately
-	// voids the cache and makes Build re-probe, so the call count alone is
-	// not a reliable assertion on a loaded machine.
-	if capabilityProbeNeeded(a.Engine, exe, time.Now()) {
-		snapshot, err := a.Engine.Capabilities(context.Background(), kernel.CapabilityRequest{})
-		t.Fatalf("second start needs a new probe; stored capabilities: %+v (err=%v)", snapshot, err)
+	// Strict reuse is only decidable when the stored cache is settled: prove
+	// the first probe left no transient verdict, then require the second
+	// start to make zero additional probe calls.
+	failOnTransientVerdicts(t, env.storedCapabilities(t))
+	before := env.countCalls()
+	a := env.build()
+	if got := env.countCalls(); got != before {
+		t.Fatalf("second start ran %d probe commands, want 0 (valid stored cache, unchanged executable)", got-before)
 	}
-	if got := countCalls(); got != first {
-		t.Logf("second start re-probed (%d extra commands) because a stored verdict was transient", got-first)
+	if capabilityProbeNeeded(a.Engine, env.exe, time.Now()) {
+		t.Fatal("valid stored cache with unchanged executable must not need a probe")
 	}
-	if !capabilityProbeNeeded(a.Engine, exe, time.Now().Add(capabilityCacheTTL+time.Minute)) {
+	if !capabilityProbeNeeded(a.Engine, env.exe, time.Now().Add(capabilityCacheTTL+time.Minute)) {
 		t.Fatal("stored probe results older than the TTL must not be reused")
 	}
+	// Touching the executable must trigger probing again; compare against
+	// the count right before this build, not against the first build.
 	future := time.Now().Add(time.Minute)
-	if err := os.Chtimes(exe, future, future); err != nil {
+	if err := os.Chtimes(env.exe, future, future); err != nil {
 		t.Fatal(err)
 	}
-	build()
-	if got := countCalls(); got == first {
+	before = env.countCalls()
+	env.build()
+	if env.countCalls() == before {
 		t.Fatal("start after lark-cli changed should probe again")
+	}
+}
+
+// TestBuildReprobesWhenStoredVerdictIsTransient verifies the transient branch
+// deterministically: a stored capability carrying a transient error must make
+// the next Build probe again, without relying on load-induced timeouts.
+func TestBuildReprobesWhenStoredVerdictIsTransient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX executable")
+	}
+	env := newProbeTestEnv(t)
+
+	// Build once to populate a valid cache, then overwrite one provider's
+	// stored verdict with a transient error through the same store Build
+	// uses.
+	env.build()
+	failOnTransientVerdicts(t, env.storedCapabilities(t))
+	transient := env.storedCapabilities(t)
+	for i := range transient.Providers {
+		if transient.Providers[i].Descriptor.Backend == "lark-cli" {
+			transient.Providers[i].Error = &kernel.ErrorDetail{Type: kernel.ErrUpstreamTransient, Message: "injected transient verdict"}
+			break
+		}
+	}
+	store, err := session.NewSQLiteStore(env.cfg.Storage.Path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCapabilities(context.Background(), transient); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before := env.countCalls()
+	env.build()
+	if env.countCalls() == before {
+		t.Fatal("Build must re-probe when the stored cache holds a transient verdict")
 	}
 }

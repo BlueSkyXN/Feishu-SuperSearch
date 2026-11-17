@@ -145,10 +145,15 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	}
 	sources = orderedSources(sources)
 	if len(sources) == 0 {
-		// Nothing to continue: report the latest search's results (not the
-		// whole session history) with its paging state intact.
+		// Nothing to continue: replay the latest search's ranking, limit and
+		// source quotas over its own candidates without calling providers,
+		// and report partial/stats from the persisted source runs.
 		latest := latestSearchCandidates(snap)
-		return kernel.SearchSnapshot{SessionID: rec.ID, Query: base.Query, Candidates: latest, Sources: snap.SourceRuns, Continuations: sortedContinuations(snap.Frontiers), Partial: false, Budget: snap.Budget}, nil
+		selected, _, unique := rankCandidates(base, latest)
+		runs := sourceRunMap(snap.SourceRuns)
+		partial, failed := partialFromRuns(runs)
+		stats := kernel.SearchStats{RawCandidates: len(latest), UniqueCandidates: unique, Returned: len(selected), SourcesCompleted: len(snap.SourceRuns) - failed, SourcesFailed: failed}
+		return kernel.SearchSnapshot{SessionID: rec.ID, Query: base.Query, Candidates: selected, Sources: snap.SourceRuns, Continuations: sortedContinuations(snap.Frontiers), Partial: partial, Budget: snap.Budget, Stats: stats}, nil
 	}
 	state := snap.Budget
 	state.MaxCalls += len(sources) * req.MaxAdditionalPages
@@ -404,9 +409,15 @@ func mergeRuns(m map[kernel.SourceID]kernel.SourceRun, results []sourcePageResul
 		old.ElapsedMS += r.run.ElapsedMS
 		if r.run.Status == kernel.StatusOK || r.run.Status == kernel.StatusEmpty {
 			// A successful page clears any earlier page's failure: the source
-			// has now delivered what was previously truncated.
-			old.Status = r.run.Status
+			// has now delivered what was previously truncated. The aggregate
+			// status reflects everything read so far, so a source with
+			// accumulated hits stays ok even when this page was empty.
 			old.Error = nil
+			if old.HitCount > 0 {
+				old.Status = kernel.StatusOK
+			} else {
+				old.Status = r.run.Status
+			}
 		} else if r.run.Status == kernel.StatusPartial {
 			old.Status = kernel.StatusPartial
 			old.Error = r.run.Error
@@ -440,6 +451,15 @@ func mergeFrontiers(m map[kernel.SourceID]kernel.Continuation, results []sourceP
 		old.PagesFetched++
 		m[r.source] = old
 	}
+}
+
+// sourceRunMap indexes persisted source runs by source.
+func sourceRunMap(runs []kernel.SourceRun) map[kernel.SourceID]kernel.SourceRun {
+	m := make(map[kernel.SourceID]kernel.SourceRun, len(runs))
+	for _, r := range runs {
+		m[r.Source] = r
+	}
+	return m
 }
 
 // latestSearchIDs returns the canonical IDs owned by the most recent search,

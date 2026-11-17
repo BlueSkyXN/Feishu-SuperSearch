@@ -581,8 +581,10 @@ type SessionSnapshot struct {
 	// searches' candidates stay in Candidates; Continue ranks and returns only
 	// the latest search's scope. Nil (snapshots written before the field
 	// existed) means the scope is unknown and callers fall back to treating
-	// all candidates as the latest search's.
-	LatestSearchCandidateIDs []string                  `json:"latest_search_candidate_ids,omitempty"`
+	// all candidates as the latest search's; an empty non-nil list means the
+	// latest search matched nothing. No omitempty so JSON round-trips keep
+	// nil and empty distinct (null vs []).
+	LatestSearchCandidateIDs []string                  `json:"latest_search_candidate_ids"`
 	Artifacts                []Artifact                `json:"artifacts"`
 	Relations                []Relation                `json:"relations"`
 	Frontiers                map[SourceID]Continuation `json:"frontiers"`

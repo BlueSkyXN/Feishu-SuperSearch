@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -741,4 +742,415 @@ func (p *missingScopeSearchProvider) Descriptor() kernel.ProviderDescriptor {
 
 func (p *missingScopeSearchProvider) Search(context.Context, kernel.ProviderSearchRequest) (kernel.CandidatePage, error) {
 	return kernel.CandidatePage{}, &kernel.ErrorDetail{Type: kernel.ErrMissingScope, Message: "tasks scope required"}
+}
+
+// --- 复核返工回归（2026-11-17 rework） ---------------------------------------
+
+// queryMatchProvider returns different match sets per query, so switching the
+// query genuinely changes which candidates the latest search owns.
+type queryMatchProvider struct {
+	source kernel.SourceID
+	titles map[string][]string // query -> titles
+}
+
+func (p *queryMatchProvider) Descriptor() kernel.ProviderDescriptor {
+	return kernel.ProviderDescriptor{ID: kernel.ProviderID("test.qmatch." + p.source), Source: p.source, ObjectKinds: []kernel.ObjectKind{kernel.KindDocument}, Operations: kernel.OperationSet{kernel.OpSearch: true, kernel.OpFetch: true}, FetchableProjection: kernel.ProjectionContent, ReturnedProjection: kernel.ProjectionHead, SupportsPagination: true, Backend: "test"}
+}
+
+func (p *queryMatchProvider) Fetch(_ context.Context, reqs []kernel.ProviderFetchRequest) ([]kernel.Artifact, error) {
+	out := make([]kernel.Artifact, 0, len(reqs))
+	for _, r := range reqs {
+		out = append(out, kernel.Artifact{Ref: r.Ref, Projection: r.Projection, Chunks: []kernel.ContentChunk{{ID: "c", Text: "历史对象正文"}}})
+	}
+	return out, nil
+}
+
+func (p *queryMatchProvider) Search(_ context.Context, r kernel.ProviderSearchRequest) (kernel.CandidatePage, error) {
+	titles := p.titles[strings.TrimSpace(r.Query)]
+	page := kernel.CandidatePage{}
+	scope := r.Identity.Normalized().ScopeKey
+	for i, title := range titles {
+		id := string(p.source) + "_" + strings.Map(func(r rune) rune {
+			if r < 'a' || r > 'z' {
+				return '_'
+			}
+			return r
+		}, strings.ToLower(title))
+		ref := kernel.ObjectRef{Platform: "feishu", ScopeKey: scope, Kind: kernel.KindDocument, NativeID: id, ProviderID: p.Descriptor().ID, Source: p.source}
+		page.Candidates = append(page.Candidates, kernel.Candidate{Ref: ref, Source: p.source, Kind: kernel.KindDocument, Title: title, NativeRank: i + 1, Projection: kernel.ProjectionHead})
+	}
+	page.RawCount = len(page.Candidates)
+	return page, nil
+}
+
+// R1: a partially cached fetch must return the requested union, not just the
+// missing delta, while the provider is still asked only for the delta.
+func TestFetchUnionIncludesAlreadyCachedProjection(t *testing.T) {
+	p := newFetchProjectionProvider()
+	close(p.release)
+	registry := provider.NewRegistry()
+	if err := registry.Register(p, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+	found, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := found.Candidates[0].Ref
+	fetch := func(proj kernel.ProjectionSet) kernel.ArtifactBatch {
+		t.Helper()
+		b, err := e.Fetch(ctx, kernel.FetchBatchRequest{SessionID: found.SessionID, Identity: id, Items: []kernel.FetchRequest{{Ref: ref, Projection: proj}}})
+		if err != nil || b.Partial || len(b.Items) != 1 || b.Items[0].Artifact == nil {
+			t.Fatalf("fetch: %+v err=%v", b, err)
+		}
+		return b
+	}
+
+	// content first, then content|summary.
+	first := fetch(kernel.ProjectionContent)
+	if !first.Items[0].Artifact.Projection.Has(kernel.ProjectionContent) || len(first.Items[0].Artifact.Chunks) != 1 {
+		t.Fatalf("content fetch=%+v", first.Items[0].Artifact)
+	}
+	beforeUnion := p.calls()
+	union := kernel.ProjectionContent | kernel.ProjectionSummary
+	got := fetch(union).Items[0].Artifact
+	if !got.Projection.Has(union) || len(got.Chunks) != 1 || got.Summary == nil {
+		t.Fatalf("union response=%+v want cached content plus fresh summary", got)
+	}
+	if p.calls()-beforeUnion != 1 {
+		t.Fatalf("union fetch provider calls=%d want 1 (delta only)", p.calls()-beforeUnion)
+	}
+	stored, err := e.Session(ctx, found.SessionID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range stored.Artifacts {
+		if a.Ref.CanonicalID == ref.CanonicalID && (!a.Projection.Has(union) || len(a.Chunks) != 1 || a.Summary == nil) {
+			t.Fatalf("stored artifact=%+v", a)
+		}
+	}
+	// Fully cached union must not call the provider at all.
+	beforeCached := p.calls()
+	if cached := fetch(union); !cached.Items[0].Cached {
+		t.Fatalf("fully cached union should hit the session cache: %+v", cached.Items[0])
+	}
+	if p.calls() != beforeCached {
+		t.Fatalf("cached union made %d provider calls", p.calls()-beforeCached)
+	}
+}
+
+// R1: summary first, then union — the summary-only cache must not drop
+// content from the union response either.
+func TestFetchUnionAfterSummaryIncludesCachedSummary(t *testing.T) {
+	p := newFetchProjectionProvider()
+	close(p.release)
+	registry := provider.NewRegistry()
+	if err := registry.Register(p, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+	found, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := found.Candidates[0].Ref
+	fetch := func(proj kernel.ProjectionSet) *kernel.Artifact {
+		t.Helper()
+		b, err := e.Fetch(ctx, kernel.FetchBatchRequest{SessionID: found.SessionID, Identity: id, Items: []kernel.FetchRequest{{Ref: ref, Projection: proj}}})
+		if err != nil || b.Partial || len(b.Items) != 1 || b.Items[0].Artifact == nil {
+			t.Fatalf("fetch: %+v err=%v", b, err)
+		}
+		return b.Items[0].Artifact
+	}
+	if got := fetch(kernel.ProjectionSummary); got.Summary == nil || len(got.Chunks) != 0 {
+		t.Fatalf("summary fetch=%+v", got)
+	}
+	union := kernel.ProjectionContent | kernel.ProjectionSummary
+	got := fetch(union)
+	if !got.Projection.Has(union) || len(got.Chunks) != 1 || got.Summary == nil {
+		t.Fatalf("union after summary=%+v", got)
+	}
+}
+
+// R2: an empty latest search must not resurrect historical candidates, across
+// memory, sqlite, and sqlite after a process restart.
+func TestEmptyLatestSearchDoesNotRestoreHistory(t *testing.T) {
+	for _, mode := range []string{"memory", "sqlite", "sqlite-restart"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rework.db")
+			var store session.Store = session.NewMemoryStore(time.Hour)
+			if mode != "memory" {
+				store = mustSQLite(t, path)
+			}
+			p := &queryMatchProvider{source: kernel.SourceDocs, titles: map[string][]string{
+				"old query": {"历史结果"},
+				"new query": nil,
+			}}
+			registry := provider.NewRegistry()
+			if err := registry.Register(p, true); err != nil {
+				t.Fatal(err)
+			}
+			e := engine.New(registry, store, engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+			defer func() { _ = e.Close() }()
+			ctx := context.Background()
+			id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+			first, err := e.Search(ctx, kernel.SearchRequest{Query: "old query", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+			if err != nil || len(first.Candidates) != 1 {
+				t.Fatalf("first=%+v err=%v", first, err)
+			}
+			second, err := e.Search(ctx, kernel.SearchRequest{SessionID: first.SessionID, Query: "new query", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+			if err != nil || len(second.Candidates) != 0 {
+				t.Fatalf("second=%+v err=%v", second, err)
+			}
+			if mode == "sqlite-restart" {
+				if err := e.Close(); err != nil {
+					t.Fatal(err)
+				}
+				e = engine.New(registry, mustSQLite(t, path), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+				defer func() { _ = e.Close() }()
+			}
+			ss, err := e.Session(ctx, first.SessionID, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ss.LatestSearchCandidateIDs == nil {
+				t.Fatal("explicitly empty latest search must persist a non-nil empty ID list")
+			}
+			if len(ss.LatestSearchCandidateIDs) != 0 {
+				t.Fatalf("latest IDs=%v want empty", ss.LatestSearchCandidateIDs)
+			}
+			more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: first.SessionID, Identity: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(more.Candidates) != 0 {
+				t.Fatalf("continue resurrected %d historical candidates", len(more.Candidates))
+			}
+			// Historical objects stay usable for Fetch in the same session.
+			historical := first.Candidates[0].Ref
+			batch, err := e.Fetch(ctx, kernel.FetchBatchRequest{SessionID: first.SessionID, Identity: id, Items: []kernel.FetchRequest{{Ref: historical, Projection: kernel.ProjectionContent}}})
+			if err != nil || len(batch.Items) != 1 || batch.Items[0].Error != nil {
+				t.Fatalf("historical fetch=%+v err=%v", batch, err)
+			}
+		})
+	}
+}
+
+// R2: first page empty but more pages advertised still counts as an
+// explicitly-known (empty) scope, and a later query switching the match set
+// updates ownership.
+func TestEmptyFirstPageSearchScopesOwnership(t *testing.T) {
+	p := &queryMatchProvider{source: kernel.SourceDocs, titles: map[string][]string{"alpha": {"结果一"}}}
+	registry := provider.NewRegistry()
+	if err := registry.Register(p, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+
+	first, err := e.Search(ctx, kernel.SearchRequest{Query: "alpha", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, LimitPerSource: 1, Strategy: kernel.SearchStrategy{Pagination: "fixed"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || len(first.Candidates) != 1 {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	// Switch to a query that matches nothing; the ownership becomes an
+	// explicitly empty list and Continue must return nothing.
+	_, err = e.Search(ctx, kernel.SearchRequest{SessionID: first.SessionID, Query: "beta", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, LimitPerSource: 1, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: first.SessionID, Identity: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more.Candidates) != 0 {
+		t.Fatalf("continue=%+v want none", more.Candidates)
+	}
+	// Switching back restores ownership of the matching candidate.
+	back, err := e.Search(ctx, kernel.SearchRequest{SessionID: first.SessionID, Query: "alpha", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, LimitPerSource: 1, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || len(back.Candidates) != 1 || back.Candidates[0].Title != "结果一" {
+		t.Fatalf("back=%+v err=%v", back, err)
+	}
+}
+
+// R3: Continue with no remaining pages must still honor the search's limit.
+func TestContinueWithoutSourcesHonorsLimit(t *testing.T) {
+	e := newMultiSourceEngine(t, session.NewMemoryStore(time.Hour))
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+	first, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Limit: 1, LimitPerSource: 10, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || len(first.Candidates) != 1 || len(first.Continuations) != 0 {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: first.SessionID, Identity: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more.Candidates) != 1 {
+		t.Fatalf("continue returned %d candidates, want limit=1 honored", len(more.Candidates))
+	}
+	if more.Stats.Returned != 1 {
+		t.Fatalf("stats.returned=%d want 1", more.Stats.Returned)
+	}
+}
+
+// R3: an explicitly exhausted source takes the same early-return path.
+func TestContinueWithExhaustedSourceHonorsLimit(t *testing.T) {
+	e := newMultiSourceEngine(t, session.NewMemoryStore(time.Hour))
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+	first, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Limit: 1, LimitPerSource: 10, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: first.SessionID, Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more.Candidates) != 1 || more.Stats.Returned != 1 {
+		t.Fatalf("continue candidates=%d stats.returned=%d want 1", len(more.Candidates), more.Stats.Returned)
+	}
+}
+
+// R3: partial state and source errors survive the no-remaining-pages path.
+func TestContinueWithoutSourcesPreservesPartial(t *testing.T) {
+	registry := provider.NewRegistry()
+	if err := registry.Register(&queryMatchProvider{source: kernel.SourceDocs, titles: map[string][]string{"target": {"唯一结果"}}}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(&missingScopeSearchProvider{}, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+	first, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs, kernel.SourceTasks}, Identity: id, LimitPerSource: 10, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || !first.Partial || len(first.Continuations) != 0 {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: first.SessionID, Identity: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !more.Partial {
+		t.Fatal("continue with no remaining pages cleared partial")
+	}
+	bySource := sourceStatuses(more.Sources)
+	if bySource[kernel.SourceTasks].Error == nil {
+		t.Fatal("tasks source error was dropped")
+	}
+	if more.Stats.SourcesFailed != 1 || more.Stats.SourcesCompleted != 1 {
+		t.Fatalf("stats=%+v", more.Stats)
+	}
+}
+
+func sourceStatuses(runs []kernel.SourceRun) map[kernel.SourceID]kernel.SourceRun {
+	m := map[kernel.SourceID]kernel.SourceRun{}
+	for _, r := range runs {
+		m[r.Source] = r
+	}
+	return m
+}
+
+// R4: an empty final page must not flip a source with accumulated hits to
+// empty, in both automatic pagination and Continue.
+func TestEmptyFinalPageKeepsNonemptySourceStatus(t *testing.T) {
+	for _, mode := range []string{"automatic", "continue", "retry-then-empty", "all-empty"} {
+		t.Run(mode, func(t *testing.T) {
+			registry := provider.NewRegistry()
+			p := &emptyFinalPageProvider{}
+			if mode == "retry-then-empty" {
+				p.failFirstCursorPage = true
+			}
+			if mode == "all-empty" {
+				p.emptyFromStart = true
+			}
+			if err := registry.Register(p, true); err != nil {
+				t.Fatal(err)
+			}
+			e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+			defer e.Close()
+			ctx := context.Background()
+			id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+			strategy := "fixed"
+			if mode == "continue" || mode == "retry-then-empty" {
+				strategy = "none"
+			}
+			snap, err := e.Search(ctx, kernel.SearchRequest{Query: "target", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, LimitPerSource: 1, Strategy: kernel.SearchStrategy{Pagination: strategy}, Budget: kernel.SearchBudget{MaxPagesPerSource: 2}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "continue" || mode == "retry-then-empty" {
+				snap, err = e.Continue(ctx, kernel.ContinueRequest{SessionID: snap.SessionID, Identity: id, Sources: []kernel.SourceID{kernel.SourceDocs}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			run := snap.Sources[0]
+			switch mode {
+			case "all-empty":
+				if len(snap.Candidates) != 0 || run.Status != kernel.StatusEmpty || run.HitCount != 0 {
+					t.Fatalf("all-empty: candidates=%d run=%+v", len(snap.Candidates), run)
+				}
+			case "retry-then-empty":
+				// page 1 ok, retried page 2 failed once, then a further
+				// Continue recovers into an empty final page: hits stay, and
+				// the recovered state must be ok, not empty.
+				more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: snap.SessionID, Identity: id, Sources: []kernel.SourceID{kernel.SourceDocs}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				run = more.Sources[0]
+				if run.HitCount != 1 || run.Status != kernel.StatusOK || run.Error != nil {
+					t.Fatalf("retry-then-empty run=%+v want ok with 1 hit", run)
+				}
+			default:
+				if len(snap.Candidates) != 1 || run.Status != kernel.StatusOK || run.HitCount != 1 {
+					t.Fatalf("%s: candidates=%d run=%+v", mode, len(snap.Candidates), run)
+				}
+			}
+		})
+	}
+}
+
+// emptyFinalPageProvider serves one hit on the first page and a truly empty
+// second page; it can also fail the second page once or be empty throughout.
+type emptyFinalPageProvider struct {
+	failFirstCursorPage bool
+	emptyFromStart      bool
+	mu                  sync.Mutex
+	failedOnce          bool
+}
+
+func (p *emptyFinalPageProvider) Descriptor() kernel.ProviderDescriptor {
+	return kernel.ProviderDescriptor{ID: "test.emptyfinal.docs", Source: kernel.SourceDocs, ObjectKinds: []kernel.ObjectKind{kernel.KindDocument}, Operations: kernel.OperationSet{kernel.OpSearch: true}, ReturnedProjection: kernel.ProjectionHead, SupportsPagination: true, Backend: "test"}
+}
+
+func (p *emptyFinalPageProvider) Search(_ context.Context, r kernel.ProviderSearchRequest) (kernel.CandidatePage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.emptyFromStart {
+		return kernel.CandidatePage{}, nil
+	}
+	if r.Cursor == "" {
+		scope := r.Identity.Normalized().ScopeKey
+		ref := kernel.ObjectRef{Platform: "feishu", ScopeKey: scope, Kind: kernel.KindDocument, NativeID: "only_result", ProviderID: p.Descriptor().ID, Source: kernel.SourceDocs}
+		return kernel.CandidatePage{Candidates: []kernel.Candidate{{Ref: ref, Source: kernel.SourceDocs, Kind: kernel.KindDocument, Title: "唯一结果", NativeRank: 1, Projection: kernel.ProjectionHead}}, HasMore: true, NextCursor: "1", RawCount: 1}, nil
+	}
+	if p.failFirstCursorPage && !p.failedOnce {
+		p.failedOnce = true
+		return kernel.CandidatePage{}, &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "later page failed once"}
+	}
+	return kernel.CandidatePage{}, nil
 }

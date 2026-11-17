@@ -46,7 +46,10 @@ func Restore(s kernel.SessionSnapshot) *Record {
 	r := &Record{
 		ID: s.ID, ScopeKey: s.ScopeKey, CreatedAt: s.CreatedAt, ExpiresAt: s.ExpiresAt,
 		Request: s.Request, Candidates: map[string]kernel.Candidate{}, Artifacts: map[string]kernel.Artifact{},
-		LatestSearchCandidateIDs: append([]string(nil), s.LatestSearchCandidateIDs...),
+		// copyIDs preserves the nil-vs-empty distinction: nil means the
+		// snapshot predates candidate ownership, empty means the latest
+		// search matched nothing.
+		LatestSearchCandidateIDs: copyIDs(s.LatestSearchCandidateIDs),
 		Relations:                append([]kernel.Relation(nil), s.Relations...), Frontiers: map[kernel.SourceID]kernel.Continuation{},
 		SourceRuns: append([]kernel.SourceRun(nil), s.SourceRuns...), Budget: s.Budget,
 		Events: append([]kernel.RetrievalEvent(nil), s.Events...),
@@ -100,11 +103,20 @@ func (r *Record) Snapshot(includeEvents bool) kernel.SessionSnapshot {
 	return kernel.SessionSnapshot{
 		ID: r.ID, ScopeKey: r.ScopeKey, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
 		Request: req, Candidates: candidates,
-		LatestSearchCandidateIDs: append([]string(nil), r.LatestSearchCandidateIDs...),
+		LatestSearchCandidateIDs: copyIDs(r.LatestSearchCandidateIDs),
 		Artifacts:                artifacts,
 		Relations:                append([]kernel.Relation(nil), r.Relations...), Frontiers: frontiers,
 		SourceRuns: append([]kernel.SourceRun(nil), r.SourceRuns...), Budget: r.Budget, Events: events,
 	}
+}
+
+// copyIDs clones an ID list while preserving the nil-vs-empty distinction
+// that latest-search ownership depends on.
+func copyIDs(ids []string) []string {
+	if ids == nil {
+		return nil
+	}
+	return append([]string{}, ids...)
 }
 
 func (r *Record) AddEvent(event kernel.RetrievalEvent) {

@@ -133,7 +133,7 @@ canonical ID
 
 所有策略受共享 `SearchBudget` 约束。`Continue` 复用 session 中的 provider cursor，不重跑第一页。
 
-后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后来源状态恢复 `ok`。
+后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后来源状态恢复 `ok`。来源状态表达累计结果：末页为空但此前已有命中时仍为 `ok`，全程无命中才为 `empty`。
 
 ## 7. Fetch 流水线
 
@@ -219,7 +219,7 @@ RetrievalEvents
 
 复用 Session 时必须匹配 identity `ScopeKey`。
 
-Session 是只增的检索工作区：Search、Query、Fetch、Expand 写入的候选、Artifact 和关系只增不删，同一计划里的多个 search 节点因此可以共用一个 Session。请求、来源游标和来源运行状态属于最近一次 Search，`Continue` 继续的是最近一次 Search；快照中的 `latest_search_candidate_ids` 记录该次搜索的候选归属，`Continue` 只排序和返回这一范围，更早搜索的候选仍留在 Session 里供 Fetch/Expand 使用（旧快照无此字段时按全部候选回退）。并发 Fetch 同一对象时，写回按 Session 当前 Artifact 合并，后完成的请求不会覆盖先完成者已保存的 projection。
+Session 是只增的检索工作区：Search、Query、Fetch、Expand 写入的候选、Artifact 和关系只增不删，同一计划里的多个 search 节点因此可以共用一个 Session。请求、来源游标和来源运行状态属于最近一次 Search，`Continue` 继续的是最近一次 Search；快照中的 `latest_search_candidate_ids` 记录该次搜索的候选归属（`null` 表示旧快照的归属未知、按全部候选回退；`[]` 表示该次搜索明确无结果），`Continue` 只排序和返回这一范围，更早搜索的候选仍留在 Session 里供 Fetch/Expand 使用。并发 Fetch 同一对象时，写回按 Session 当前 Artifact 合并，后完成的请求不会覆盖先完成者已保存的 projection；部分命中缓存时响应包含请求的全部 Projection，Provider 仍只读取缺失部分。无后续页的 Continue 按当前搜索的排序、limit 和配额重放结果并保留 partial 状态。
 
 ## 11. Adapter
 

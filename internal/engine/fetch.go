@@ -114,14 +114,20 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 			return
 		}
 		artifact.Ref = mergeRef(work.req.Ref, artifact.Ref)
-		// The returned artifact merges what other fetchers in this same request
-		// already materialized, so the response reflects the freshest state.
+		// The response must cover everything this request asked for: merge in
+		// what this request's earlier fetchers materialized (fresh) and what
+		// was already cached when the request started (ss). fresh stays the
+		// provider delta only, so the locked write-back below still merges
+		// with the session's current artifact instead of overwriting it.
 		artifactMu.Lock()
 		if old, ok := fresh[artifact.Ref.CanonicalID]; ok {
 			artifact = mergeArtifact(old, artifact)
 		}
 		fresh[artifact.Ref.CanonicalID] = artifact
 		artifactMu.Unlock()
+		if cached, ok := snapshotArtifact(ss, artifact.Ref.CanonicalID); ok {
+			artifact = mergeArtifact(cached, artifact)
+		}
 		copy := artifact
 		results[work.index] = kernel.ArtifactResult{Ref: artifact.Ref, Artifact: &copy, Shared: shared}
 		e.addEvent(rec, kernel.EventArtifactUpsert, artifact.Ref.Source, map[string]any{"artifact": artifact, "shared": shared})
