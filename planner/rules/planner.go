@@ -22,7 +22,7 @@ func (Planner) Plan(_ context.Context, r planner.UserRequest, caps kernel.Capabi
 		limit = 40
 	}
 	query := compactQuery(r.Query)
-	searchReq := kernel.SearchRequest{Query: query, SourceQueries: sourceQueries(query, sources), Sources: sources, Filters: r.Filters, Identity: r.Identity, Limit: limit, LimitPerSource: 8, Budget: r.Budget, Strategy: kernel.SearchStrategy{Fusion: "weighted_rrf", Pagination: "adaptive", SourceQuota: true}}
+	searchReq := kernel.SearchRequest{Query: r.Query, SourceQueries: sourceQueries(query, sources), Sources: sources, Filters: r.Filters, Identity: r.Identity, Limit: limit, LimitPerSource: 8, Budget: r.Budget, Strategy: kernel.SearchStrategy{Fusion: "weighted_rrf", Pagination: "adaptive", SourceQuota: true}}
 	raw, _ := json.Marshal(searchReq)
 	nodes := []kernel.PlanNode{{ID: "search", Op: kernel.PlanSearch, Request: raw, Priority: 100}}
 	output := []string{"search"}
@@ -93,6 +93,7 @@ func selectSources(q string, caps kernel.CapabilitySnapshot) []kernel.SourceID {
 func sourceQueries(query string, sources []kernel.SourceID) map[kernel.SourceID]string {
 	out := map[kernel.SourceID]string{}
 	for _, source := range sources {
+		out[source] = query
 		limit := 0
 		switch source {
 		case kernel.SourceDocs:

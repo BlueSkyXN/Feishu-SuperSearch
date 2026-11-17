@@ -184,6 +184,8 @@ Schema：[`api/retrieval-plan.schema.json`](../api/retrieval-plan.schema.json)�
 }
 ```
 
+`max_items` 是该节点输出数量的上限。也可在 `request.top_k` 指定希望保留的数量；同时给出两者时取较小值。只给出其中一个时使用该值，两者都省略时保留前 20 项。Candidate 与 Artifact 分别按此数量截取，保持各自输入顺序。
+
 ### `project`
 
 将上游结果转换为指定输出形态或字段集合。当前用于确定性计划内部数据转换。

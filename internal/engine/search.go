@@ -33,7 +33,6 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 		return kernel.SearchSnapshot{}, err
 	}
 	req.SessionID = rec.ID
-	rec.WithLock(func(r *session.Record) { r.Request = &req })
 	if history, ok := e.sessions.(session.QueryHistoryStore); ok {
 		if err := history.RecordQuery(ctx, rec.ID, req); err != nil {
 			return kernel.SearchSnapshot{}, sessionPersistenceError(err, "record_query")
@@ -90,6 +89,8 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 	// and queries stay, so later Fetch/Expand calls can still use them. Paging
 	// state (request, frontiers, source runs) belongs to the latest search.
 	rec.WithLock(func(r *session.Record) {
+		r.Request = &req
+		r.SearchRevision++
 		for _, c := range allScored {
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
@@ -124,7 +125,7 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	if err != nil {
 		return kernel.SearchSnapshot{}, err
 	}
-	snap := rec.Snapshot(false)
+	snap, searchRevision := rec.SnapshotWithSearchRevision()
 	if snap.Request == nil {
 		return kernel.SearchSnapshot{}, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "session has no search request"}
 	}
@@ -190,10 +191,19 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	}
 	selected, allScored, unique := rankCandidates(base, all)
 	budgetState := budget.Snapshot()
+	stale := false
 	rec.WithLock(func(r *session.Record) {
+		stale = r.SearchRevision != searchRevision
 		for _, c := range allScored {
+			if _, exists := r.Candidates[c.Ref.CanonicalID]; stale && exists {
+				continue
+			}
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
+		if stale {
+			return
+		}
+		r.SearchRevision++
 		r.LatestSearchCandidateIDs = latestSearchIDs(allScored)
 		r.Frontiers = frontiers
 		r.SourceRuns = sortedRuns(runs)
@@ -203,6 +213,13 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	snapshot := kernel.SearchSnapshot{SessionID: rec.ID, Query: base.Query, Candidates: selected, Sources: sortedRuns(runs), Continuations: sortedContinuations(frontiers), Partial: partial, Budget: budgetState, Stats: kernel.SearchStats{RawCandidates: len(all), UniqueCandidates: unique, Returned: len(selected), SourcesCompleted: len(runs) - failed, SourcesFailed: failed}}
 	if err := e.sessions.Save(ctx, rec); err != nil {
 		return snapshot, sessionPersistenceError(err, "save_continue")
+	}
+	if stale {
+		return kernel.SearchSnapshot{SessionID: rec.ID}, &kernel.ErrorDetail{
+			Type: kernel.ErrInvalidRequest, Subtype: "search_state_changed",
+			Message: "search state changed while continuing",
+			Hint:    "reload the session before continuing the latest search",
+		}
 	}
 	return snapshot, nil
 }
@@ -380,8 +397,9 @@ func rankCandidates(req kernel.SearchRequest, all []kernel.Candidate) ([]kernel.
 	for k, v := range req.Strategy.Quotas {
 		quotas[k] = v
 	}
-	allScored, unique := fusion.Fuse(req.Query, all, len(all), fusion.Config{K0: req.Strategy.K0, Weights: weights, Quotas: quotas, UseQuota: false}, req.Identity.ScopeKey)
-	selected, _ := fusion.Fuse(req.Query, all, req.Limit, fusion.Config{K0: req.Strategy.K0, Weights: weights, Quotas: quotas, UseQuota: req.Strategy.SourceQuota}, req.Identity.ScopeKey)
+	referenceTime := time.Now()
+	allScored, unique := fusion.Fuse(req.Query, all, len(all), fusion.Config{K0: req.Strategy.K0, Weights: weights, Quotas: quotas, UseQuota: false, ReferenceTime: referenceTime}, req.Identity.ScopeKey)
+	selected, _ := fusion.Fuse(req.Query, all, req.Limit, fusion.Config{K0: req.Strategy.K0, Weights: weights, Quotas: quotas, UseQuota: req.Strategy.SourceQuota, ReferenceTime: referenceTime}, req.Identity.ScopeKey)
 	return selected, allScored, unique
 }
 func runsFromResults(results []sourcePageResult) map[kernel.SourceID]kernel.SourceRun {

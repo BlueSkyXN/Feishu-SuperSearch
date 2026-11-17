@@ -468,3 +468,37 @@ func TestMapFetchSkipsUnreadableCandidatesAndFillsTopK(t *testing.T) {
 		t.Fatalf("doc projection=%v, want only the available content", captured.Items[0].Projection.Strings())
 	}
 }
+
+func TestLimitHonorsMaxItemsAndTopK(t *testing.T) {
+	candidates := make([]kernel.Candidate, 25)
+	artifacts := make([]kernel.Artifact, 25)
+	for i := range candidates {
+		candidates[i] = planCandidate(strings.Repeat("x", i+1), kernel.KindDocument)
+		artifacts[i] = planArtifact(candidates[i].Ref)
+	}
+	deps := map[string]kernel.NodeResult{"search": {Candidates: candidates, Artifacts: artifacts}}
+	for _, tc := range []struct {
+		name                 string
+		maxItems, topK, want int
+	}{
+		{"max_items_only", 1, 0, 1},
+		{"top_k_only", 0, 3, 3},
+		{"max_items_caps_top_k", 2, 4, 2},
+		{"top_k_below_max_items", 4, 2, 2},
+		{"legacy_default", 0, 0, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]int{"top_k": tc.topK})
+			node := kernel.PlanNode{ID: "limit", Op: kernel.PlanLimit, MaxItems: tc.maxItems, Request: raw}
+			result, _ := New(&executionKernel{}, 1).executeNode(context.Background(), kernel.RetrievalPlan{}, node, deps, "sid")
+			if result.State != kernel.NodeSucceeded || len(result.Candidates) != tc.want || len(result.Artifacts) != tc.want {
+				t.Fatalf("result=%+v want %d candidates/artifacts", result, tc.want)
+			}
+			for i, c := range result.Candidates {
+				if c.Ref.NativeID != candidates[i].Ref.NativeID || result.Artifacts[i].Ref.NativeID != artifacts[i].Ref.NativeID {
+					t.Fatal("limit changed input order")
+				}
+			}
+		})
+	}
+}

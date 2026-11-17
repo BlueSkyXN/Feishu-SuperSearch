@@ -415,7 +415,13 @@ func (e *Executor) executeNode(ctx context.Context, plan kernel.RetrievalPlan, n
 		}
 		_ = json.Unmarshal(node.Request, &r)
 		if r.TopK <= 0 {
-			r.TopK = 20
+			r.TopK = node.MaxItems
+			if r.TopK <= 0 {
+				r.TopK = 20
+			}
+		}
+		if node.MaxItems > 0 && r.TopK > node.MaxItems {
+			r.TopK = node.MaxItems
 		}
 		cands := depCandidates(deps)
 		if len(cands) > r.TopK {

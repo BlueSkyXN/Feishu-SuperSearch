@@ -30,8 +30,13 @@ func TestPlannerSelectsSemanticSourcesAndBuildsDeepPlan(t *testing.T) {
 	if !reflect.DeepEqual(request.Sources, want) {
 		t.Fatalf("sources=%v want=%v", request.Sources, want)
 	}
-	if strings.Contains(request.Query, "请帮我") || request.Limit != 40 {
+	if request.Query != "请帮我查找会议任务邮件联系人群聊文档" || request.Limit != 40 {
 		t.Fatalf("request=%+v", request)
+	}
+	for _, source := range want {
+		if request.SourceQueries[source] != "会议任务邮件联系人群聊文档" {
+			t.Fatalf("source=%s query=%q", source, request.SourceQueries[source])
+		}
 	}
 	if err := planvalidate.Validate(plan); err != nil {
 		t.Fatalf("rules plan is invalid: %v", err)
@@ -51,11 +56,14 @@ func TestSelectSourcesFallsBackToAvailableGlobalSource(t *testing.T) {
 func TestSourceQueriesAndCompactionBoundaries(t *testing.T) {
 	long := strings.Repeat("文", 60)
 	queries := sourceQueries(long, []kernel.SourceID{kernel.SourceDocs, kernel.SourceMail, kernel.SourceTasks})
-	if len([]rune(queries[kernel.SourceDocs])) != 30 || len([]rune(queries[kernel.SourceMail])) != 50 || queries[kernel.SourceTasks] != "" {
+	if len([]rune(queries[kernel.SourceDocs])) != 30 || len([]rune(queries[kernel.SourceMail])) != 50 || queries[kernel.SourceTasks] != long {
 		t.Fatalf("queries=%v", queries)
 	}
-	if got := sourceQueries("short", []kernel.SourceID{kernel.SourceDocs}); got != nil {
+	if got := sourceQueries("short", []kernel.SourceID{kernel.SourceDocs}); got[kernel.SourceDocs] != "short" {
 		t.Fatalf("short query override=%v", got)
+	}
+	if got := sourceQueries("short", nil); got != nil {
+		t.Fatalf("no sources should produce no overrides: %v", got)
 	}
 	if got := compactQuery(" 请帮我  搜索 A 项目 最近一周 "); got != "A 项目" {
 		t.Fatalf("compact=%q", got)

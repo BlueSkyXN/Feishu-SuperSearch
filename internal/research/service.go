@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/ai"
+	budgetctl "github.com/BlueSkyXN/Feishu-SuperSearch/internal/budget"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/planner"
 	rulesplanner "github.com/BlueSkyXN/Feishu-SuperSearch/planner/rules"
@@ -145,15 +146,27 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		seenArtifacts[key] = true
 	}
 	if s.Reranker != nil && len(candidates) > 1 {
+		// Execute has completed, so its final ledger state can be continued
+		// by rerank hydration without allocating a fresh budget or deadline.
+		account := budgetctl.FromState(planResult.Budget)
+		rerankCtx := budgetctl.WithAccount(ctx, account)
+		if deadline := account.Deadline(); !deadline.IsZero() {
+			var cancel context.CancelFunc
+			rerankCtx, cancel = context.WithDeadline(rerankCtx, deadline)
+			defer cancel()
+		}
 		emit(progressEvent(PhaseReranking, "正在重排高价值候选"))
-		reranked, rerankErr := s.Reranker.Rerank(ctx, req.Query, candidates)
+		reranked, rerankErr := s.Reranker.Rerank(rerankCtx, req.Query, candidates)
 		if rerankErr != nil {
 			warnings = append(warnings, "AI rerank 失败，保留确定性排序："+rerankErr.Error())
 		} else if len(reranked) == len(candidates) {
 			candidates = reranked
 			if req.Deep {
-				additional, fetchWarnings := s.fetchReranked(ctx, req, planResult.SessionID, candidates, artifacts)
+				additional, fetchWarnings := s.fetchReranked(rerankCtx, req, planResult.SessionID, candidates, artifacts)
 				warnings = append(warnings, fetchWarnings...)
+				if len(fetchWarnings) > 0 {
+					planResult.Partial = true
+				}
 				for _, artifact := range additional {
 					key := artifact.Ref.CanonicalID
 					if key == "" {
@@ -168,6 +181,7 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		} else {
 			warnings = append(warnings, "AI rerank 返回候选数量不一致，保留确定性排序")
 		}
+		planResult.Budget = account.Snapshot()
 	}
 	cp := synthesis.CandidatePack{Query: req.Query, SessionID: planResult.SessionID, Candidates: candidates, Sources: sourceRuns}
 	ap := synthesis.ArtifactPack{SessionID: planResult.SessionID, Artifacts: artifacts, Relations: relations}

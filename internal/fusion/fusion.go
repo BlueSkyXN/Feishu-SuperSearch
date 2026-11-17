@@ -17,6 +17,8 @@ type Config struct {
 	Weights  map[kernel.SourceID]float64
 	Quotas   map[kernel.SourceID]int
 	UseQuota bool
+	// ReferenceTime pins recency scoring for deterministic fixtures/replay.
+	ReferenceTime time.Time
 }
 
 func DefaultWeights() map[kernel.SourceID]float64 {
@@ -198,6 +200,9 @@ func Fuse(query string, all []kernel.Candidate, limit int, cfg Config, scope str
 	if cfg.Quotas == nil {
 		cfg.Quotas = DefaultQuotas()
 	}
+	if cfg.ReferenceTime.IsZero() {
+		cfg.ReferenceTime = time.Now()
+	}
 	merged := make(map[string]kernel.Candidate, len(all))
 	for _, raw := range all {
 		c := Canonicalize(raw, scope)
@@ -236,7 +241,7 @@ func Fuse(query string, all []kernel.Candidate, limit int, cfg Config, scope str
 			score += math.Min(.015, .004*float64(len(c.DiscoveredBy)-1))
 		}
 		if c.Timestamp != nil {
-			days := time.Since(*c.Timestamp).Hours() / 24
+			days := cfg.ReferenceTime.Sub(*c.Timestamp).Hours() / 24
 			if days >= 0 && days < 30 {
 				score += .006 * (1 - days/30)
 			}
