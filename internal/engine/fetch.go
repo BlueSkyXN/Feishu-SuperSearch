@@ -427,7 +427,9 @@ func mergeArtifact(a, b kernel.Artifact) kernel.Artifact {
 	out.Projection |= b.Projection
 	// Allocate a new map: a.Metadata may be shared with a live session record
 	// or an immutable snapshot, and merging must never mutate those in place.
-	out.Metadata = make(map[string]any, len(a.Metadata)+len(b.Metadata))
+	// No capacity hint: metadata sizes derive from provider responses, and
+	// the map grows on demand under the session byte budget.
+	out.Metadata = map[string]any{}
 	for k, v := range a.Metadata {
 		out.Metadata[k] = v
 	}

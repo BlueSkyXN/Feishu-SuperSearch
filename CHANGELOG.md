@@ -19,6 +19,7 @@
 - 后续分页因调用预算耗尽或上游错误失败时：已取得的候选保留、来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后成功页，Continue 从失败页重试、不重复不跳过；成功重试后状态恢复 `ok`。此前会显示 `ok`、`partial=false` 并丢失续查游标
 - `internal/app` 探测缓存测试改为直接断言缓存复用判定：全仓并行测试负载下探测子进程可能超过 3 秒超时，此时重新探测是设计内行为，调用计数断言在满载机器上不可靠
 - 为两处请求派生的切片容量分配补充就地限幅说明与钳制（`fusion.Fuse` 的 top-K 池、research 补读的 fetch 列表）：容量明确不超过实际候选数，回应 CodeQL `uncontrolled-allocation-size` 在 PR 分析中的告警（两处实际均已受限，main 分支分析同告警为 open）
+- Artifact 合并的 metadata map 改为不带容量提示初始化：容量来自 Provider 响应大小，按需增长即可，同样回应 CodeQL 的不受控分配告警
 - `sfs serve` 与 `sfs mcp` 现在把启动时的 `--profile`、`--as` 作为默认身份；此前请求未带 identity 时会落到 lark-cli 默认 profile 和 `auto` 身份。Web 工作台不再固定发送 `mode: "auto"`，改用服务端默认身份；`sfs plan` 同样使用全局身份参数补齐计划中缺省的字段
 - 翻页结果的来源内名次改由 Kernel 统一加页偏移，第 2 页不再与第 1 页同名次、同分并穿插排序；Provider 契约改为返回页内名次，mock Provider 同步调整
 - MCP `tools/call` 接受协议保留的 `_meta` 字段，不再以 `-32602` 拒绝带 progressToken 等元数据的请求
