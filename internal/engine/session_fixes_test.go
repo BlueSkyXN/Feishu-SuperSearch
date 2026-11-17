@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1153,4 +1154,109 @@ func (p *emptyFinalPageProvider) Search(_ context.Context, r kernel.ProviderSear
 		return kernel.CandidatePage{}, &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "later page failed once"}
 	}
 	return kernel.CandidatePage{}, nil
+}
+
+// R2 boundary: an empty first page that still advertises a real cursor must
+// keep the latest search's ownership and let Continue fetch the new query's
+// next page (not the previous query's results).
+func TestEmptyFirstPageWithRealCursorScopesContinue(t *testing.T) {
+	p := &emptyFirstCursorProvider{multiSourcePagedProvider{source: kernel.SourceDocs, titles: []string{"旧查询结果"}}}
+	registry := provider.NewRegistry()
+	if err := registry.Register(p, true); err != nil {
+		t.Fatal(err)
+	}
+	e := engine.New(registry, session.NewMemoryStore(time.Hour), engine.Config{GlobalConcurrency: 4, ProviderTimeout: time.Second, SessionTTL: time.Hour})
+	defer e.Close()
+	ctx := context.Background()
+	id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+
+	old, err := e.Search(ctx, kernel.SearchRequest{Query: "old", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || len(old.Candidates) != 1 {
+		t.Fatalf("old=%+v err=%v", old, err)
+	}
+	empty, err := e.Search(ctx, kernel.SearchRequest{SessionID: old.SessionID, Query: "new", Sources: []kernel.SourceID{kernel.SourceDocs}, Identity: id, Strategy: kernel.SearchStrategy{Pagination: "none"}, Budget: kernel.SearchBudget{MaxPagesPerSource: 1}})
+	if err != nil || len(empty.Candidates) != 0 || len(empty.Continuations) != 1 {
+		t.Fatalf("empty=%+v err=%v", empty, err)
+	}
+	if empty.Continuations[0].Cursor == "" || !empty.Continuations[0].HasMore {
+		t.Fatalf("continuation=%+v want a real cursor", empty.Continuations[0])
+	}
+	more, err := e.Continue(ctx, kernel.ContinueRequest{SessionID: old.SessionID, Identity: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more.Candidates) != 1 || more.Candidates[0].Title != "new result" {
+		t.Fatalf("continue=%+v want only the new query's next page", more.Candidates)
+	}
+}
+
+// emptyFirstCursorProvider: query "old" returns one hit; query "new" returns
+// an empty first page that still has a real next cursor, then one hit.
+type emptyFirstCursorProvider struct {
+	multiSourcePagedProvider
+}
+
+func (p *emptyFirstCursorProvider) Search(ctx context.Context, req kernel.ProviderSearchRequest) (kernel.CandidatePage, error) {
+	if req.Query == "old" {
+		return p.multiSourcePagedProvider.Search(ctx, req)
+	}
+	if req.Cursor == "" {
+		return kernel.CandidatePage{HasMore: true, NextCursor: "next"}, nil
+	}
+	ref := kernel.ObjectRef{Platform: "feishu", ScopeKey: req.Identity.Normalized().ScopeKey, Kind: kernel.KindDocument, NativeID: "new_query_result", ProviderID: p.Descriptor().ID, Source: kernel.SourceDocs}
+	return kernel.CandidatePage{Candidates: []kernel.Candidate{{Ref: ref, Source: kernel.SourceDocs, Kind: kernel.KindDocument, Title: "new result", NativeRank: 1, Projection: kernel.ProjectionHead}}, RawCount: 1}, nil
+}
+
+// R2 compatibility: the latest-search ownership field must survive
+// JSON round-trips in all four wire shapes — field missing (legacy
+// snapshots), null (unknown scope), [] (explicitly empty search), and a
+// non-empty list — with nil and empty staying distinct.
+func TestOwnershipIDsSurviveJSONRoundTrip(t *testing.T) {
+	for _, mode := range []string{"missing", "null", "empty", "nonempty"} {
+		t.Run(mode, func(t *testing.T) {
+			id := kernel.Identity{Mode: kernel.IdentityAuto}.Normalized()
+			rec := session.NewRecord(id.ScopeKey, time.Hour)
+			switch mode {
+			case "empty":
+				rec.LatestSearchCandidateIDs = []string{}
+			case "nonempty":
+				rec.LatestSearchCandidateIDs = []string{"current"}
+			}
+			wire, err := json.Marshal(rec.Snapshot(false))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(wire, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "missing" {
+				delete(fields, "latest_search_candidate_ids")
+				if wire, err = json.Marshal(fields); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "empty" && strings.TrimSpace(string(fields["latest_search_candidate_ids"])) != "[]" {
+				t.Fatalf("empty list serialized as %s, want []", fields["latest_search_candidate_ids"])
+			}
+			if mode == "nonempty" && strings.Contains(string(fields["latest_search_candidate_ids"]), "null") {
+				t.Fatalf("non-empty list serialized as %s", fields["latest_search_candidate_ids"])
+			}
+			var loaded kernel.SessionSnapshot
+			if err := json.Unmarshal(wire, &loaded); err != nil {
+				t.Fatal(err)
+			}
+			restored := session.Restore(loaded).Snapshot(false)
+			wantNil := mode == "missing" || mode == "null"
+			if (restored.LatestSearchCandidateIDs == nil) != wantNil {
+				t.Fatalf("mode=%s ids=%#v wantNil=%v", mode, restored.LatestSearchCandidateIDs, wantNil)
+			}
+			if mode == "nonempty" && (len(restored.LatestSearchCandidateIDs) != 1 || restored.LatestSearchCandidateIDs[0] != "current") {
+				t.Fatalf("ids=%v", restored.LatestSearchCandidateIDs)
+			}
+			if mode == "empty" && len(restored.LatestSearchCandidateIDs) != 0 {
+				t.Fatalf("ids=%v want empty non-nil", restored.LatestSearchCandidateIDs)
+			}
+		})
+	}
 }

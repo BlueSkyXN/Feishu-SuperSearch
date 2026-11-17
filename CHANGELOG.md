@@ -18,7 +18,7 @@
 - `Continue` 只返回最近一次 Search 及其续页的候选，不再把同一 Session 中更早搜索的对象混入当前结果（含切换来源、同来源换 query 的情况）；早先候选仍留在 Session 中供 Fetch/Expand 使用。Session 快照新增 `latest_search_candidate_ids` 记录归属：`null`（旧快照、归属未知）按全部候选回退，`[]`（该次搜索明确无结果）不再混入历史候选；字段不以 omitted 序列化，nil 与空列表在内存复制、JSON 与 SQLite 恢复中全程可区分
 - 无后续页的 `Continue`（省略 sources 或来源已耗尽）按当前搜索的排序、limit 与来源配额重放结果，并依据持久化 SourceRuns 计算 `partial` 与统计字段，不再放宽限制或清除部分失败状态
 - 部分命中缓存的 Fetch 返回此次请求的全部 Projection 与对应内容（Provider 仍只读取缺失差集，写回仍与 Session 当前 Artifact 合并）；空末页不再把已有累计命中的来源标为 `empty`（累计无命中才为 `empty`）
-- 探测缓存测试恢复严格行为断言：先证明首次探测未存下 transient 结论，再要求第二次 Build 探测调用数为零；可执行文件变化的比较基准改为该次 Build 前的计数；transient 触发重探测由独立用例确定性验证（直接注入 transient 能力快照）
+- 探测缓存测试恢复严格行为断言：持久化快照只经 `LoadCapabilities` 只读校验（不触发 Build/Probe，注入的 transient 记录保持原样），再要求第二次 Build 探测调用数为零；可执行文件变化的比较基准改为该次 Build 前的计数；transient 触发重探测由独立用例确定性验证（直接注入 transient 能力快照）。"每次 Build 都探测"与"仅第二次 Build 探测"两个变体均可被检出
 - 后续分页因调用预算耗尽或上游错误失败时：已取得的候选保留、来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后成功页，Continue 从失败页重试、不重复不跳过；成功重试后状态恢复 `ok`。此前会显示 `ok`、`partial=false` 并丢失续查游标
 - 探测缓存测试曾因全仓并行负载偶发失败而放宽为只断言复用判定，复核确认该做法无法检出"每次启动都重新探测"的回归，已按上一条恢复严格断言；负载偶发场景由"先证明缓存无 transient 结论"的前置检查区分环境噪声与真实回归
 - 为 `fusion.Fuse` 与 research 补读的容量分配处补充限幅注释（容量本就不超过实际候选数，代码行为未变），以及 `mergeArtifact` 去掉 metadata 容量提示：回应 CodeQL `uncontrolled-allocation-size` 告警（两处 main 分支同告警为 open，非本 PR 引入）

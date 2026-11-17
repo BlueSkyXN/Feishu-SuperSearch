@@ -64,11 +64,19 @@ func (e *probeTestEnv) countCalls() int {
 	return strings.Count(string(raw), "\n")
 }
 
-// storedCapabilities reads what the session database holds without probing.
+// storedCapabilities reads the persisted capability snapshot through the
+// actual CapabilityStore (LoadCapabilities). It must never go through Build
+// or Capabilities: Build consults the cache and may re-probe, which would
+// both consume (and repair) the very first-cache evidence the reuse test
+// asserts on and skew the subprocess counters.
 func (e *probeTestEnv) storedCapabilities(t *testing.T) kernel.CapabilitySnapshot {
 	t.Helper()
-	a := e.build()
-	snapshot, err := a.Engine.Capabilities(context.Background(), kernel.CapabilityRequest{})
+	store, err := session.NewSQLiteStore(e.cfg.Storage.Path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snapshot, err := store.LoadCapabilities(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +101,50 @@ func failOnTransientVerdicts(t *testing.T, snapshot kernel.CapabilitySnapshot) {
 	}
 }
 
+// TestStoredCapabilitiesReadsPersistedCacheWithoutProbing pins the read
+// helper itself to LoadCapabilities: opening it must not run any probe
+// subprocess, and a transient verdict injected into the persisted cache must
+// survive the read untouched (it must not be consumed or repaired).
+func TestStoredCapabilitiesReadsPersistedCacheWithoutProbing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX executable")
+	}
+	env := newProbeTestEnv(t)
+	env.build()
+
+	store, err := session.NewSQLiteStore(env.cfg.Storage.Path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.LoadCapabilities(context.Background())
+	if err != nil || len(stored.Providers) == 0 {
+		t.Fatalf("load err=%v providers=%d", err, len(stored.Providers))
+	}
+	stored.Providers[0].Error = &kernel.ErrorDetail{Type: kernel.ErrUpstreamTransient, Message: "injected first-cache transient"}
+	if err := store.SaveCapabilities(context.Background(), stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before := env.countCalls()
+	observed := env.storedCapabilities(t)
+	after := env.countCalls()
+	hasTransient := false
+	for _, capability := range observed.Providers {
+		if capability.Error != nil && capability.Error.Type == kernel.ErrUpstreamTransient {
+			hasTransient = true
+		}
+	}
+	if after != before {
+		t.Fatalf("storedCapabilities ran %d probe commands; the read helper must go through LoadCapabilities only", after-before)
+	}
+	if !hasTransient {
+		t.Fatal("storedCapabilities consumed or repaired the injected transient verdict")
+	}
+}
+
 func TestBuildReusesStoredProbeUntilExecutableChanges(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test helper uses a POSIX executable")
@@ -104,9 +156,10 @@ func TestBuildReusesStoredProbeUntilExecutableChanges(t *testing.T) {
 	if first == 0 {
 		t.Fatal("first start should probe lark-cli")
 	}
-	// Strict reuse is only decidable when the stored cache is settled: prove
-	// the first probe left no transient verdict, then require the second
-	// start to make zero additional probe calls.
+	// Strict reuse is only decidable when the stored cache is settled: read
+	// the persisted snapshot (no Build, no probe) and require it to hold no
+	// transient verdict, then demand the second Build make zero additional
+	// probe calls.
 	failOnTransientVerdicts(t, env.storedCapabilities(t))
 	before := env.countCalls()
 	a := env.build()
@@ -134,7 +187,9 @@ func TestBuildReusesStoredProbeUntilExecutableChanges(t *testing.T) {
 
 // TestBuildReprobesWhenStoredVerdictIsTransient verifies the transient branch
 // deterministically: a stored capability carrying a transient error must make
-// the next Build probe again, without relying on load-induced timeouts.
+// the next Build probe again, without relying on load-induced timeouts. The
+// transient verdict is injected through the store and read back through the
+// read-only helper first, so the helper provably did not consume it.
 func TestBuildReprobesWhenStoredVerdictIsTransient(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test helper uses a POSIX executable")
