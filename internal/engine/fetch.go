@@ -40,11 +40,12 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 	results := make([]kernel.ArtifactResult, len(items))
 	works := make([]fetchWork, 0, len(items))
 	ss := rec.Snapshot(false)
-	artifactMap := map[string]kernel.Artifact{}
+	// fresh holds only what this request newly materialized from providers.
+	// Cached artifacts read from the snapshot must not be written back below,
+	// otherwise a slow request would overwrite the artifacts a concurrent
+	// request already merged into the session.
+	fresh := map[string]kernel.Artifact{}
 	var artifactMu sync.Mutex
-	for _, a := range ss.Artifacts {
-		artifactMap[a.Ref.CanonicalID] = a
-	}
 	for i, item := range items {
 		ref := item.Ref
 		if item.Projection.Empty() {
@@ -68,7 +69,7 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 			ref.CanonicalID = kernel.BuildCanonicalID(ref.ScopeKey, ref.Kind, ref.NativeID)
 		}
 		item.Ref = ref
-		if existing, ok := artifactMap[ref.CanonicalID]; ok && existing.Projection.Has(item.Projection) {
+		if existing, ok := snapshotArtifact(ss, ref.CanonicalID); ok && existing.Projection.Has(item.Projection) {
 			a := existing
 			results[i] = kernel.ArtifactResult{Ref: ref, Artifact: &a, Cached: true}
 			continue
@@ -91,7 +92,7 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 			continue
 		}
 		missing := item.Projection
-		if existing, ok := artifactMap[ref.CanonicalID]; ok {
+		if existing, ok := snapshotArtifact(ss, ref.CanonicalID); ok {
 			missing = item.Projection.Missing(existing.Projection)
 		}
 		if missing == 0 {
@@ -113,12 +114,20 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 			return
 		}
 		artifact.Ref = mergeRef(work.req.Ref, artifact.Ref)
+		// The response must cover everything this request asked for: merge in
+		// what this request's earlier fetchers materialized (fresh) and what
+		// was already cached when the request started (ss). fresh stays the
+		// provider delta only, so the locked write-back below still merges
+		// with the session's current artifact instead of overwriting it.
 		artifactMu.Lock()
-		if old, ok := artifactMap[artifact.Ref.CanonicalID]; ok {
+		if old, ok := fresh[artifact.Ref.CanonicalID]; ok {
 			artifact = mergeArtifact(old, artifact)
 		}
-		artifactMap[artifact.Ref.CanonicalID] = artifact
+		fresh[artifact.Ref.CanonicalID] = artifact
 		artifactMu.Unlock()
+		if cached, ok := snapshotArtifact(ss, artifact.Ref.CanonicalID); ok {
+			artifact = mergeArtifact(cached, artifact)
+		}
 		copy := artifact
 		results[work.index] = kernel.ArtifactResult{Ref: artifact.Ref, Artifact: &copy, Shared: shared}
 		e.addEvent(rec, kernel.EventArtifactUpsert, artifact.Ref.Source, map[string]any{"artifact": artifact, "shared": shared})
@@ -210,10 +219,16 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 		}
 	}
 	state := budget.Snapshot()
+	// Merge this request's fresh results into whatever the session holds right
+	// now. Reading the live record under its lock (not the request-start
+	// snapshot) keeps updates from a concurrent Fetch that finished earlier.
 	rec.WithLock(func(r *session.Record) {
 		artifactMu.Lock()
 		defer artifactMu.Unlock()
-		for id, a := range artifactMap {
+		for id, a := range fresh {
+			if current, ok := r.Artifacts[id]; ok {
+				a = mergeArtifact(current, a)
+			}
 			r.Artifacts[id] = a
 		}
 		r.Budget = state
@@ -226,6 +241,18 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 		return batch, &kernel.ErrorDetail{Type: kernel.ErrUnsupported, Message: "no fetch item could be executed"}
 	}
 	return batch, nil
+}
+
+// snapshotArtifact finds an artifact in an immutable session snapshot. The
+// returned value may still share map/slice backing arrays with the snapshot,
+// so callers must not mutate it in place.
+func snapshotArtifact(ss kernel.SessionSnapshot, canonicalID string) (kernel.Artifact, bool) {
+	for _, a := range ss.Artifacts {
+		if a.Ref.CanonicalID == canonicalID {
+			return a, true
+		}
+	}
+	return kernel.Artifact{}, false
 }
 
 func knownSessionRef(snapshot kernel.SessionSnapshot, requested kernel.ObjectRef) (kernel.ObjectRef, bool) {
@@ -404,8 +431,13 @@ func mergeArtifact(a, b kernel.Artifact) kernel.Artifact {
 	out := a
 	out.Ref = mergeRef(out.Ref, b.Ref)
 	out.Projection |= b.Projection
-	if out.Metadata == nil {
-		out.Metadata = map[string]any{}
+	// Allocate a new map: a.Metadata may be shared with a live session record
+	// or an immutable snapshot, and merging must never mutate those in place.
+	// No capacity hint: metadata sizes derive from provider responses, and
+	// the map grows on demand under the session byte budget.
+	out.Metadata = map[string]any{}
+	for k, v := range a.Metadata {
+		out.Metadata[k] = v
 	}
 	for k, v := range b.Metadata {
 		out.Metadata[k] = v

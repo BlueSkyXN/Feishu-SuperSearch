@@ -142,7 +142,9 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	req = s.App.ApplyDefaults(req)
 	snap, err := s.App.Engine.Search(r.Context(), req)
 	if err != nil && len(snap.Candidates) == 0 {
@@ -156,7 +158,9 @@ func (s *Server) continueSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	snap, err := s.App.Engine.Continue(r.Context(), req)
 	if err != nil && len(snap.Candidates) == 0 {
 		writeError(w, err)
@@ -169,7 +173,9 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	snap, err := s.App.Engine.Query(r.Context(), req)
 	if err != nil && len(snap.Candidates) == 0 {
 		writeError(w, err)
@@ -182,7 +188,9 @@ func (s *Server) fetch(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	batch, err := s.App.Engine.Fetch(r.Context(), req)
 	if err != nil && len(batch.Items) == 0 {
 		writeError(w, err)
@@ -195,7 +203,9 @@ func (s *Server) expand(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	batch, err := s.App.Engine.Expand(r.Context(), req)
 	if err != nil && len(batch.Relations) == 0 {
 		writeError(w, err)
@@ -208,7 +218,9 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	refs, err := s.App.Engine.Resolve(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
@@ -222,7 +234,9 @@ func (s *Server) executePlan(w http.ResponseWriter, r *http.Request) {
 	if !s.decodePlan(w, r, &plan) {
 		return
 	}
-	plan.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &plan.Identity) {
+		return
+	}
 	events, results, err := s.App.Engine.Execute(r.Context(), plan)
 	if err != nil {
 		writeError(w, err)
@@ -315,7 +329,9 @@ func (s *Server) runResearch(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	if strings.TrimSpace(req.Query) == "" {
 		writeError(w, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "query is required"})
 		return
@@ -365,7 +381,9 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req) {
 		return
 	}
-	req.Identity.ScopeKey = ""
+	if !s.resolveIdentity(w, &req.Identity) {
+		return
+	}
 	if strings.TrimSpace(req.Query) == "" {
 		writeError(w, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "query is required"})
 		return
@@ -474,7 +492,7 @@ func (s *Server) streamWorkflow(w http.ResponseWriter, r *http.Request, events <
 }
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	identity, err := identityFromQuery(r)
+	identity, err := s.identityFromQuery(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -488,7 +506,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	identity, err := identityFromQuery(r)
+	identity, err := s.identityFromQuery(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -501,7 +519,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
-	identity, err := identityFromQuery(r)
+	identity, err := s.identityFromQuery(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -513,11 +531,27 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func identityFromQuery(r *http.Request) (kernel.Identity, error) {
+// resolveIdentity applies the startup identity rules to a request body's
+// identity and writes the error response when the request is rejected.
+func (s *Server) resolveIdentity(w http.ResponseWriter, identity *kernel.Identity) bool {
+	resolved, err := s.App.RequestIdentity(*identity)
+	if err != nil {
+		writeError(w, err)
+		return false
+	}
+	*identity = resolved
+	return true
+}
+
+func (s *Server) identityFromQuery(r *http.Request) (kernel.Identity, error) {
 	identity := kernel.Identity{Profile: strings.TrimSpace(r.URL.Query().Get("profile")), Mode: kernel.IdentityMode(strings.TrimSpace(r.URL.Query().Get("mode")))}
 	switch identity.Mode {
 	case "", kernel.IdentityAuto, kernel.IdentityUser, kernel.IdentityBot:
-		return identity.Normalized(), nil
+		resolved, err := s.App.RequestIdentity(identity)
+		if err != nil {
+			return kernel.Identity{}, err
+		}
+		return resolved.Normalized(), nil
 	default:
 		return kernel.Identity{}, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Message: "identity mode must be auto, user, or bot"}
 	}

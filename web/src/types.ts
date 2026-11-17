@@ -252,6 +252,7 @@ export interface ProviderCapability {
   status: SourceStatus;
   version?: string;
   error?: ErrorDetail;
+  observed_at?: string;
   operations?: Record<string, {
     status: SourceStatus;
     version?: string;

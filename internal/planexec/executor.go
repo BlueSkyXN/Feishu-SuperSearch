@@ -452,18 +452,25 @@ func (e *Executor) executeNode(ctx context.Context, plan kernel.RetrievalPlan, n
 		if r.TopK <= 0 || r.TopK > r.MaxItems {
 			r.TopK = r.MaxItems
 		}
-		cands := depCandidates(deps)
-		if len(cands) > r.TopK {
-			cands = cands[:r.TopK]
-		}
+		// Read the top_k candidates that can be read, asking each only for the
+		// wanted projections it declares available. A candidate with no
+		// available projection (for example a Base found by docs search) or
+		// none of the wanted ones is skipped and the next candidate takes its
+		// place, as in research's rerank refetch.
 		items := []kernel.FetchRequest{}
-		for _, c := range cands {
+		for _, c := range depCandidates(deps) {
+			if len(items) == r.TopK {
+				break
+			}
 			p := r.ProjectionByKind[c.Kind]
 			if p == 0 {
 				p = r.DefaultProjection
 			}
 			if p == 0 {
 				p = defaultProjection(c.Kind)
+			}
+			if p &= c.AvailableProjection; p == 0 {
+				continue
 			}
 			items = append(items, kernel.FetchRequest{Ref: c.Ref, Projection: p})
 		}

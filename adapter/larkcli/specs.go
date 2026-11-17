@@ -43,12 +43,12 @@ func BuiltinSpecs() []SourceSpec {
 		{
 			Descriptor: desc("larkcli.docs", kernel.SourceDocs, []kernel.ObjectKind{kernel.KindDocument, kernel.KindSheet, kernel.KindBase, kernel.KindAttachment}, userBot, []string{"search:docs:read"}, 20, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionStructure|kernel.ProjectionContent|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"drive", "+search", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--only-title"},
-			SearchArgs: docsSearchArgs, FetchArgs: docsFetchArgs, ItemKeys: []string{"results", "res_units", "items", "docs"}, IDKeys: []string{"token", "doc_token", "obj_token", "document_id", "wiki_token", "id"}, TitleKeys: []string{"title", "name"}, SnippetKeys: []string{"content", "snippet", "summary"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"edit_time", "update_time", "modified_time", "create_time"},
+			SearchArgs: docsSearchArgs, FetchArgs: docsFetchArgs, ItemKeys: []string{"results", "res_units", "items", "docs"}, IDKeys: []string{"token", "result_meta.token", "doc_token", "obj_token", "document_id", "wiki_token", "id"}, TitleKeys: []string{"title", "title_highlighted", "name"}, SnippetKeys: []string{"content", "snippet", "summary", "summary_highlighted"}, URLKeys: []string{"url", "result_meta.url", "link"}, TimeKeys: []string{"edit_time", "update_time", "result_meta.update_time", "modified_time", "create_time"},
 		},
 		{
 			Descriptor: desc("larkcli.messages", kernel.SourceMessages, []kernel.ObjectKind{kernel.KindMessage}, user, []string{"search:message", "im:message:readonly"}, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet|kernel.ProjectionContent|kernel.ProjectionContext, kernel.ProjectionContent|kernel.ProjectionContext|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"im", "+messages-search", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--sender"},
-			SearchArgs: messagesSearchArgs, FetchArgs: messageFetchArgs, ExpandArgs: messageFetchArgsAsExpand, ItemKeys: []string{"results", "messages", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"chat_name", "title", "subject"}, SnippetKeys: []string{"text", "content", "snippet", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"create_time", "timestamp", "time"},
+			SearchArgs: messagesSearchArgs, FetchArgs: messageFetchArgs, ExpandArgs: messageFetchArgsAsExpand, ItemKeys: []string{"results", "messages", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"chat_name", "title", "subject", "sender.name"}, SnippetKeys: []string{"text", "content", "snippet", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"create_time", "timestamp", "time"},
 		},
 		{
 			Descriptor: desc("larkcli.chats", kernel.SourceChats, []kernel.ObjectKind{kernel.KindChat}, userBot, nil, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionContent|kernel.ProjectionRelations),
@@ -58,22 +58,22 @@ func BuiltinSpecs() []SourceSpec {
 		{
 			Descriptor: desc("larkcli.people", kernel.SourcePeople, []kernel.ObjectKind{kernel.KindPerson}, user, nil, 30, false, kernel.ProjectionHead|kernel.ProjectionContent, kernel.ProjectionRelations),
 			ProbeArgs:  []string{"contact", "+search-user", "--help"}, ProbeFlags: []string{"--query", "--page-size"},
-			SearchArgs: peopleSearchArgs, FetchArgs: personFetchArgs, ItemKeys: []string{"users", "results", "items"}, IDKeys: []string{"open_id", "user_id", "id"}, TitleKeys: []string{"name", "display_name", "en_name"}, SnippetKeys: []string{"email", "enterprise_email", "department_name"}, URLKeys: []string{"url"}, TimeKeys: nil,
+			SearchArgs: peopleSearchArgs, FetchArgs: personFetchArgs, ItemKeys: []string{"users", "results", "items"}, IDKeys: []string{"open_id", "user_id", "id"}, TitleKeys: []string{"name", "display_name", "localized_name", "en_name"}, SnippetKeys: []string{"email", "enterprise_email", "department_name"}, URLKeys: []string{"url"}, TimeKeys: nil,
 		},
 		{
 			Descriptor: desc("larkcli.minutes", kernel.SourceMinutes, []kernel.ObjectKind{kernel.KindMinute}, user, []string{"minutes:minutes.search:read"}, 30, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionSummary|kernel.ProjectionStructure|kernel.ProjectionContent|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"minutes", "+search", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--participant-ids"},
-			SearchArgs: minutesSearchArgs, FetchArgs: minutesFetchArgs, ItemKeys: []string{"minutes", "results", "items"}, IDKeys: []string{"minute_token", "token", "id"}, TitleKeys: []string{"title", "name"}, SnippetKeys: []string{"summary", "snippet"}, URLKeys: []string{"url", "minute_url"}, TimeKeys: []string{"start_time", "create_time", "time"},
+			SearchArgs: minutesSearchArgs, FetchArgs: minutesFetchArgs, ItemKeys: []string{"minutes", "results", "items"}, IDKeys: []string{"minute_token", "token", "id"}, TitleKeys: []string{"title", "name", "display_info"}, SnippetKeys: []string{"summary", "snippet", "meta_data.description"}, URLKeys: []string{"url", "minute_url", "meta_data.app_link"}, TimeKeys: []string{"start_time", "create_time", "time"},
 		},
 		{
 			Descriptor: desc("larkcli.meetings", kernel.SourceMeetings, []kernel.ObjectKind{kernel.KindMeeting}, user, nil, 30, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionContent|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"vc", "+search", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--participant-ids"},
-			SearchArgs: meetingsSearchArgs, FetchArgs: meetingFetchArgs, ExpandArgs: meetingExpandArgs, ItemKeys: []string{"meetings", "results", "items"}, IDKeys: []string{"meeting_id", "id"}, TitleKeys: []string{"topic", "title", "name"}, SnippetKeys: []string{"description", "summary"}, URLKeys: []string{"url", "meeting_url"}, TimeKeys: []string{"start_time", "create_time"},
+			SearchArgs: meetingsSearchArgs, FetchArgs: meetingFetchArgs, ExpandArgs: meetingExpandArgs, ItemKeys: []string{"meetings", "results", "items"}, IDKeys: []string{"meeting_id", "id"}, TitleKeys: []string{"topic", "title", "name", "display_info"}, SnippetKeys: []string{"description", "meta_data.description", "summary"}, URLKeys: []string{"url", "meeting_url", "meta_data.app_link"}, TimeKeys: []string{"start_time", "create_time"},
 		},
 		{
 			Descriptor: desc("larkcli.calendar", kernel.SourceCalendar, []kernel.ObjectKind{kernel.KindEvent}, user, nil, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionContent|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"calendar", "+search-event", "--help"}, ProbeFlags: []string{"--query", "--page-size", "--page-token", "--attendee-ids"},
-			SearchArgs: calendarSearchArgs, FetchArgs: calendarFetchArgs, ItemKeys: []string{"events", "results", "items"}, IDKeys: []string{"event_id", "id"}, TitleKeys: []string{"summary", "title", "name"}, SnippetKeys: []string{"description", "snippet"}, URLKeys: []string{"app_link", "url", "link"}, TimeKeys: []string{"start_time", "start", "create_time"},
+			SearchArgs: calendarSearchArgs, FetchArgs: calendarFetchArgs, ItemKeys: []string{"events", "results", "items"}, IDKeys: []string{"event_id", "id"}, TitleKeys: []string{"summary", "title", "name"}, SnippetKeys: []string{"description", "snippet"}, URLKeys: []string{"app_link", "url", "link"}, TimeKeys: []string{"start_time", "start.date_time", "start", "create_time"},
 		},
 		{
 			Descriptor: desc("larkcli.tasks", kernel.SourceTasks, []kernel.ObjectKind{kernel.KindTask, kernel.KindTaskList}, user, nil, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet|kernel.ProjectionContent, kernel.ProjectionContent|kernel.ProjectionRelations),
@@ -83,7 +83,7 @@ func BuiltinSpecs() []SourceSpec {
 		{
 			Descriptor: desc("larkcli.mail", kernel.SourceMail, []kernel.ObjectKind{kernel.KindMail}, userBot, nil, 50, true, kernel.ProjectionHead|kernel.ProjectionSnippet, kernel.ProjectionContent|kernel.ProjectionContext|kernel.ProjectionRelations),
 			ProbeArgs:  []string{"mail", "+triage", "--help"}, ProbeFlags: []string{"--query", "--max", "--page-token", "--mailbox"},
-			SearchArgs: mailSearchArgs, FetchArgs: mailFetchArgs, ItemKeys: []string{"messages", "mails", "results", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"subject", "title"}, SnippetKeys: []string{"snippet", "summary", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"received_time", "create_time", "timestamp"},
+			SearchArgs: mailSearchArgs, FetchArgs: mailFetchArgs, ItemKeys: []string{"messages", "mails", "results", "items"}, IDKeys: []string{"message_id", "id"}, TitleKeys: []string{"subject", "title"}, SnippetKeys: []string{"snippet", "summary", "body"}, URLKeys: []string{"url", "link"}, TimeKeys: []string{"received_time", "create_time", "timestamp", "date"},
 		},
 		{
 			Descriptor: desc("larkcli.base", kernel.SourceBase, []kernel.ObjectKind{kernel.KindRecord}, userBot, nil, 200, true, kernel.ProjectionHead|kernel.ProjectionContent, 0),
@@ -380,13 +380,13 @@ func meetingFetchArgs(r kernel.ProviderFetchRequest) ([]string, error) {
 }
 func calendarFetchArgs(r kernel.ProviderFetchRequest) ([]string, error) {
 	calendarID := metadataString(r.Ref, "calendar_id")
-	if calendarID == "" {
-		return nil, fmt.Errorf("calendar fetch requires calendar_id in ref URL query or native_id 'calendar/event'")
-	}
 	eventID := r.Ref.NativeID
 	if strings.Contains(eventID, "/") {
 		parts := strings.SplitN(eventID, "/", 2)
 		calendarID, eventID = parts[0], parts[1]
+	}
+	if calendarID == "" {
+		return nil, &kernel.ErrorDetail{Type: kernel.ErrInvalidRequest, Source: kernel.SourceCalendar, Message: "calendar fetch requires native_id 'calendar_id/event_id' or calendar_id in the ref URL query"}
 	}
 	if _, err := safePathSegment(calendarID, "calendar id"); err != nil {
 		return nil, err

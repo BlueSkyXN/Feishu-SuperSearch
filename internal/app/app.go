@@ -30,6 +30,13 @@ type App struct {
 	Reranker ai.Reranker
 	Answerer ai.Answerer
 	Backend  string
+	// DefaultIdentity is the identity chosen at startup with --profile/--as.
+	// RequestIdentity uses it for requests that leave profile or mode empty.
+	DefaultIdentity kernel.Identity
+	// PinProfile and PinMode are set when --profile or --as was given
+	// explicitly at startup. Requests may then only repeat that value.
+	PinProfile bool
+	PinMode    bool
 }
 
 type providerRegistration struct {
@@ -173,9 +180,11 @@ func Build(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("unsupported storage type %q", cfg.Storage.Type)
 	}
 	eng := engine.New(reg, store, engine.Config{GlobalConcurrency: cfg.Runtime.GlobalConcurrency, ProviderTimeout: cfg.ProviderTimeout(), SessionTTL: cfg.SessionTTL()})
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 8*time.Second)
-	_, _ = eng.Capabilities(probeCtx, kernel.CapabilityRequest{Probe: true})
-	probeCancel()
+	if capabilityProbeNeeded(eng, cfg.LarkCLI.Executable, time.Now()) {
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		_, _ = eng.Capabilities(probeCtx, kernel.CapabilityRequest{Probe: true})
+		probeCancel()
+	}
 	var (
 		pl       planner.Planner
 		reranker ai.Reranker
@@ -236,6 +245,40 @@ func buildAIClient(cfg Config, feature AIFeatureConfig) (*openaiadapter.Client, 
 	}
 	client, err := openaiadapter.NewClient(openaiadapter.ClientConfig{BaseURL: cfg.AI.BaseURL, APIKey: cfg.AIAPIKey(), Timeout: cfg.AIFeatureTimeout(feature), MaxInputBytes: cfg.AI.MaxInputBytes, MaxResponseBytes: cfg.AI.MaxResponseBytes, JSONSchema: cfg.AI.JSONSchema})
 	return client, model, err
+}
+
+// RequestIdentity returns the identity to use for a request from the CLI, HTTP
+// or MCP. An empty profile or mode is taken from DefaultIdentity. When the
+// value was pinned at startup, a request asking for a different one is
+// rejected: MCP callers are models whose instructions may come from retrieved
+// content, and the startup flags are the operator's chosen scope. The scope
+// key is cleared so that it is always derived from profile and mode, never
+// supplied by the caller.
+func (a *App) RequestIdentity(id kernel.Identity) (kernel.Identity, error) {
+	id.ScopeKey = ""
+	id.Profile = strings.TrimSpace(id.Profile)
+	if a.PinProfile && id.Profile != "" && id.Profile != a.DefaultIdentity.Profile {
+		return kernel.Identity{}, pinnedIdentityError("profile", "--profile", id.Profile, a.DefaultIdentity.Profile)
+	}
+	if a.PinMode && id.Mode != "" && id.Mode != a.DefaultIdentity.Mode {
+		return kernel.Identity{}, pinnedIdentityError("mode", "--as", string(id.Mode), string(a.DefaultIdentity.Mode))
+	}
+	if id.Profile == "" {
+		id.Profile = a.DefaultIdentity.Profile
+	}
+	if id.Mode == "" {
+		id.Mode = a.DefaultIdentity.Mode
+	}
+	return id, nil
+}
+
+func pinnedIdentityError(field, flag, requested, allowed string) error {
+	return &kernel.ErrorDetail{
+		Type:    kernel.ErrIdentityRequired,
+		Subtype: "identity_pinned",
+		Message: fmt.Sprintf("this server was started with %s %q; omit identity.%s or pass %q", flag, allowed, field, allowed),
+		Details: map[string]any{"field": field, "requested": requested, "allowed": allowed},
+	}
 }
 
 func (a *App) ApplyDefaults(req kernel.SearchRequest) kernel.SearchRequest {

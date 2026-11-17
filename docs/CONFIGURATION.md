@@ -61,7 +61,7 @@ sfs --config ~/.config/sfs/config.json providers
 {
   "runtime": {
     "global_concurrency": 6,
-    "provider_timeout": "4s",
+    "provider_timeout": "8s",
     "listen": "127.0.0.1:3765"
   }
 }
@@ -111,10 +111,10 @@ sfs --config ~/.config/sfs/config.json providers
 
 - `executable` 可以是绝对路径；
 - `profile_args` 在每次调用时追加，适合特殊 CLI 包装器；
-- `timeout` 是子进程时限；
+- `timeout` 是子进程时限。一次 Search 或 Query 同时受 `runtime.provider_timeout` 限制，实际生效的是两者中较小的值，搜索超时时先调大 `runtime.provider_timeout`；
 - 输出上限用于防止异常 Provider 占用无限内存。
 
-身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。
+身份由请求中的 `Identity` 或 CLI 的 `--profile`、`--as` 提供。`sfs serve` 和 `sfs mcp` 中，请求省略的 `profile`、`mode` 取启动时的 `--profile`、`--as`；显式给出的启动值不能被请求改成其他值。
 
 ## 7. Direct OpenAPI
 
@@ -365,4 +365,4 @@ sfs --config config.example.json providers
 sfs --config config.example.json doctor
 ```
 
-程序启动时会执行 capability handshake 并缓存结果；`providers` 读取当前能力，`doctor` 使用 `probe=true` 再次探测。只对 `unsupported`/`version_incompatible` 在执行前选择已验证备用 Provider；权限和身份错误不会被静默 fallback 掩盖。
+程序启动时会执行 capability handshake，结果存入 SQLite。之后的启动在以下条件都满足时直接复用存储的结果、不再探测：每个 Provider 都有 1 小时内的结果，记录的失败只有 `unsupported`/`version_incompatible`，lark-cli 可执行文件（含指向它的符号链接）在上次探测后未修改。换用其他路径的 lark-cli 后，运行 `sfs doctor` 刷新。`providers` 读取当前能力，`doctor` 使用 `probe=true` 再次探测。只对 `unsupported`/`version_incompatible` 在执行前选择已验证备用 Provider；权限和身份错误不会被静默 fallback 掩盖。

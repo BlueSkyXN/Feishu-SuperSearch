@@ -75,6 +75,8 @@ AvailableProjection
 Provenance
 ```
 
+`NativeRank` 和 `DiscoveredBy[].Rank` 是本页内的名次，从 1 开始。翻页时不要自己加偏移，Kernel 会按该来源此前各页已返回的条数统一加上，保证第 2 页的名次排在第 1 页之后。
+
 推荐在 Adapter 内补充：
 
 ```text

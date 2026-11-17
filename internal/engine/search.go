@@ -57,7 +57,7 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 	searchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
-	first := e.searchWave(searchCtx, rec, req, sources, nil, budget)
+	first := e.searchWave(searchCtx, rec, req, sources, nil, nil, budget)
 	all := collectCandidates(first)
 	runs := runsFromResults(first)
 	frontiers := frontiersFromResults(first)
@@ -74,7 +74,7 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 			for _, s := range moreSources {
 				cursors[s] = frontiers[s].Cursor
 			}
-			next := e.searchWave(searchCtx, rec, req, moreSources, cursors, budget)
+			next := e.searchWave(searchCtx, rec, req, moreSources, cursors, rankOffsets(runs, moreSources), budget)
 			if len(next) == 0 {
 				break
 			}
@@ -86,11 +86,14 @@ func (e *Engine) Search(ctx context.Context, req kernel.SearchRequest) (kernel.S
 		}
 	}
 	budgetState := budget.Snapshot()
+	// A session is an append-only workspace: candidates from earlier searches
+	// and queries stay, so later Fetch/Expand calls can still use them. Paging
+	// state (request, frontiers, source runs) belongs to the latest search.
 	rec.WithLock(func(r *session.Record) {
-		r.Candidates = map[string]kernel.Candidate{}
 		for _, c := range allScored {
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
+		r.LatestSearchCandidateIDs = latestSearchIDs(allScored)
 		r.Frontiers = frontiers
 		r.SourceRuns = sortedRuns(runs)
 		r.Budget = budgetState
@@ -142,7 +145,15 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	}
 	sources = orderedSources(sources)
 	if len(sources) == 0 {
-		return kernel.SearchSnapshot{SessionID: rec.ID, Query: base.Query, Candidates: snap.Candidates, Sources: snap.SourceRuns, Continuations: sortedContinuations(snap.Frontiers), Budget: snap.Budget}, nil
+		// Nothing to continue: replay the latest search's ranking, limit and
+		// source quotas over its own candidates without calling providers,
+		// and report partial/stats from the persisted source runs.
+		latest := latestSearchCandidates(snap)
+		selected, _, unique := rankCandidates(base, latest)
+		runs := sourceRunMap(snap.SourceRuns)
+		partial, failed := partialFromRuns(runs)
+		stats := kernel.SearchStats{RawCandidates: len(latest), UniqueCandidates: unique, Returned: len(selected), SourcesCompleted: len(snap.SourceRuns) - failed, SourcesFailed: failed}
+		return kernel.SearchSnapshot{SessionID: rec.ID, Query: base.Query, Candidates: selected, Sources: snap.SourceRuns, Continuations: sortedContinuations(snap.Frontiers), Partial: partial, Budget: snap.Budget, Stats: stats}, nil
 	}
 	state := snap.Budget
 	state.MaxCalls += len(sources) * req.MaxAdditionalPages
@@ -155,7 +166,10 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 		runs[r.Source] = r
 	}
 	frontiers := snap.Frontiers
-	all := append([]kernel.Candidate(nil), snap.Candidates...)
+	// Continue ranks only the latest search's candidates; older searches'
+	// candidates stay in the session for Fetch/Expand but must not leak into
+	// this search's results.
+	all := append([]kernel.Candidate(nil), latestSearchCandidates(snap)...)
 	for round := 0; round < req.MaxAdditionalPages; round++ {
 		active := []kernel.SourceID{}
 		cursors := map[kernel.SourceID]string{}
@@ -169,7 +183,7 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 		if len(active) == 0 {
 			break
 		}
-		res := e.searchWave(continueCtx, rec, base, active, cursors, budget)
+		res := e.searchWave(continueCtx, rec, base, active, cursors, rankOffsets(runs, active), budget)
 		all = append(all, collectCandidates(res)...)
 		mergeRuns(runs, res)
 		mergeFrontiers(frontiers, res)
@@ -177,10 +191,10 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	selected, allScored, unique := rankCandidates(base, all)
 	budgetState := budget.Snapshot()
 	rec.WithLock(func(r *session.Record) {
-		r.Candidates = map[string]kernel.Candidate{}
 		for _, c := range allScored {
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
+		r.LatestSearchCandidateIDs = latestSearchIDs(allScored)
 		r.Frontiers = frontiers
 		r.SourceRuns = sortedRuns(runs)
 		r.Budget = budgetState
@@ -193,7 +207,10 @@ func (e *Engine) Continue(ctx context.Context, req kernel.ContinueRequest) (kern
 	return snapshot, nil
 }
 
-func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel.SearchRequest, sources []kernel.SourceID, cursors map[kernel.SourceID]string, budget budgetctl.Account) []sourcePageResult {
+// searchWave runs one page per source. offsets holds how many candidates each
+// source already returned in earlier pages; providers report page-local ranks
+// and the offset turns them into ranks within the whole result list.
+func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel.SearchRequest, sources []kernel.SourceID, cursors map[kernel.SourceID]string, offsets map[kernel.SourceID]int, budget budgetctl.Account) []sourcePageResult {
 	sem := make(chan struct{}, e.cfg.GlobalConcurrency)
 	ch := make(chan sourcePageResult, len(sources))
 	var wg sync.WaitGroup
@@ -204,7 +221,7 @@ func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ch <- e.searchOne(ctx, rec, req, source, cursors[source], budget)
+			ch <- e.searchOne(ctx, rec, req, source, cursors[source], offsets[source], budget)
 		}()
 	}
 	wg.Wait()
@@ -216,7 +233,7 @@ func (e *Engine) searchWave(ctx context.Context, rec *session.Record, req kernel
 	sort.Slice(out, func(i, j int) bool { return out[i].source < out[j].source })
 	return out
 }
-func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.SearchRequest, source kernel.SourceID, cursor string, budget budgetctl.Account) sourcePageResult {
+func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.SearchRequest, source kernel.SourceID, cursor string, offset int, budget budgetctl.Account) sourcePageResult {
 	started := time.Now()
 	result := sourcePageResult{source: source, run: kernel.SourceRun{Source: source, Status: kernel.StatusFailed}}
 	p, ok := e.registry.ForOperation(source, kernel.OpSearch)
@@ -287,15 +304,19 @@ func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.
 	}
 	result.page = page
 	result.err = err
-	result.run.Pages = 1
 	result.run.HitCount = len(page.Candidates)
 	result.run.ElapsedMS = time.Since(started).Milliseconds()
 	if err != nil {
+		// A failed call consumed budget but delivered no page: it must not
+		// count as read, so paging budget and page numbers stay consistent
+		// with the continuation cursor.
 		result.run.Status = statusForError(err)
 		result.run.Error = kernel.DetailFromError(err)
 	} else if len(page.Candidates) == 0 {
+		result.run.Pages = 1
 		result.run.Status = kernel.StatusEmpty
 	} else {
+		result.run.Pages = 1
 		result.run.Status = kernel.StatusOK
 	}
 	for i := range result.page.Candidates {
@@ -312,13 +333,35 @@ func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.
 		if c.NativeRank <= 0 {
 			c.NativeRank = i + 1
 		}
+		c.NativeRank += offset
+		if c.Provenance.SourceRank > 0 {
+			c.Provenance.SourceRank += offset
+		}
 		if len(c.DiscoveredBy) == 0 {
 			c.DiscoveredBy = []kernel.Discovery{{ProviderID: result.provider, Source: source, Rank: c.NativeRank, Score: c.NativeScore, Cursor: cursor}}
+		} else {
+			for j := range c.DiscoveredBy {
+				if c.DiscoveredBy[j].Rank <= 0 {
+					c.DiscoveredBy[j].Rank = c.NativeRank
+				} else {
+					c.DiscoveredBy[j].Rank += offset
+				}
+			}
 		}
 		e.addEvent(rec, kernel.EventCandidateUpsert, source, map[string]any{"candidate": *c})
 	}
 	e.addEvent(rec, kernel.EventSourceCompleted, source, map[string]any{"run": result.run})
 	return result
+}
+
+// rankOffsets returns, for each source, the number of candidates it returned in
+// earlier pages of the same search.
+func rankOffsets(runs map[kernel.SourceID]kernel.SourceRun, sources []kernel.SourceID) map[kernel.SourceID]int {
+	out := make(map[kernel.SourceID]int, len(sources))
+	for _, s := range sources {
+		out[s] = runs[s].HitCount
+	}
+	return out
 }
 
 func collectCandidates(results []sourcePageResult) []kernel.Candidate {
@@ -358,22 +401,48 @@ func frontiersFromResults(results []sourcePageResult) map[kernel.SourceID]kernel
 func mergeRuns(m map[kernel.SourceID]kernel.SourceRun, results []sourcePageResult) {
 	for _, r := range results {
 		old := m[r.source]
+		earlierHits := old.HitCount
 		old.ProviderID = r.run.ProviderID
 		old.Source = r.source
 		old.Pages += r.run.Pages
 		old.HitCount += r.run.HitCount
 		old.ElapsedMS += r.run.ElapsedMS
-		if r.run.Status == kernel.StatusFailed || r.run.Status == kernel.StatusMissingScope || r.run.Status == kernel.StatusDeadline {
-			old.Status = r.run.Status
+		if r.run.Status == kernel.StatusOK || r.run.Status == kernel.StatusEmpty {
+			// A successful page clears any earlier page's failure: the source
+			// has now delivered what was previously truncated. The aggregate
+			// status reflects everything read so far, so a source with
+			// accumulated hits stays ok even when this page was empty.
+			old.Error = nil
+			if old.HitCount > 0 {
+				old.Status = kernel.StatusOK
+			} else {
+				old.Status = r.run.Status
+			}
+		} else if r.run.Status == kernel.StatusPartial {
+			old.Status = kernel.StatusPartial
 			old.Error = r.run.Error
-		} else if old.Status == "" || old.Status == kernel.StatusEmpty {
+		} else {
+			// Any other page outcome is a failure. It does not undo the
+			// results of earlier pages, and it must not be reported as ok:
+			// keep the concrete error and mark the source partial when it
+			// already returned results.
 			old.Status = r.run.Status
+			if earlierHits > 0 {
+				old.Status = kernel.StatusPartial
+			}
+			old.Error = r.run.Error
 		}
 		m[r.source] = old
 	}
 }
 func mergeFrontiers(m map[kernel.SourceID]kernel.Continuation, results []sourcePageResult) {
 	for _, r := range results {
+		if r.run.Status != kernel.StatusOK && r.run.Status != kernel.StatusEmpty {
+			// The page did not advance: keep the last valid cursor and page
+			// count so a retry continues from where the source actually is,
+			// and never adopt an empty cursor from a failed call.
+			continue
+		}
 		old := m[r.source]
 		old.ProviderID = r.provider
 		old.Source = r.source
@@ -383,6 +452,46 @@ func mergeFrontiers(m map[kernel.SourceID]kernel.Continuation, results []sourceP
 		m[r.source] = old
 	}
 }
+
+// sourceRunMap indexes persisted source runs by source.
+func sourceRunMap(runs []kernel.SourceRun) map[kernel.SourceID]kernel.SourceRun {
+	m := make(map[kernel.SourceID]kernel.SourceRun, len(runs))
+	for _, r := range runs {
+		m[r.Source] = r
+	}
+	return m
+}
+
+// latestSearchIDs returns the canonical IDs owned by the most recent search,
+// in ranking order, for the LatestSearchCandidateIDs session field.
+func latestSearchIDs(scored []kernel.Candidate) []string {
+	ids := make([]string, 0, len(scored))
+	for _, c := range scored {
+		ids = append(ids, c.Ref.CanonicalID)
+	}
+	return ids
+}
+
+// latestSearchCandidates filters a snapshot down to the latest search's
+// candidates. Snapshots written before the ownership field existed (nil)
+// keep the previous behavior of treating every session candidate as current.
+func latestSearchCandidates(snap kernel.SessionSnapshot) []kernel.Candidate {
+	if snap.LatestSearchCandidateIDs == nil {
+		return snap.Candidates
+	}
+	byID := make(map[string]kernel.Candidate, len(snap.Candidates))
+	for _, c := range snap.Candidates {
+		byID[c.Ref.CanonicalID] = c
+	}
+	out := make([]kernel.Candidate, 0, len(snap.LatestSearchCandidateIDs))
+	for _, id := range snap.LatestSearchCandidateIDs {
+		if c, ok := byID[id]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func sortedRuns(m map[kernel.SourceID]kernel.SourceRun) []kernel.SourceRun {
 	out := make([]kernel.SourceRun, 0, len(m))
 	for _, r := range m {
@@ -431,14 +540,21 @@ func aggregateSearchFailure(runs map[kernel.SourceID]kernel.SourceRun) *kernel.E
 	return &kernel.ErrorDetail{Type: typeOf, Message: "all search sources failed", Retryable: retryable, Details: details}
 }
 
+// partialFromRuns reports whether any source fell short and how many sources
+// failed outright; a partial source returned results and is not counted as
+// failed.
 func partialFromRuns(m map[kernel.SourceID]kernel.SourceRun) (bool, int) {
-	failed := 0
+	partial, failed := false, 0
 	for _, r := range m {
-		if r.Status != kernel.StatusOK && r.Status != kernel.StatusEmpty {
+		if r.Status == kernel.StatusOK || r.Status == kernel.StatusEmpty {
+			continue
+		}
+		partial = true
+		if r.Status != kernel.StatusPartial {
 			failed++
 		}
 	}
-	return failed > 0, failed
+	return partial, failed
 }
 func chooseNextSources(req kernel.SearchRequest, selected []kernel.Candidate, last []sourcePageResult, frontiers map[kernel.SourceID]kernel.Continuation) []kernel.SourceID {
 	if req.Strategy.Pagination == "fixed" || req.Strategy.Pagination == "all" {

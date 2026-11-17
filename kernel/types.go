@@ -559,6 +559,8 @@ type ProviderCapability struct {
 	Version    string                                    `json:"version,omitempty"`
 	Error      *ErrorDetail                              `json:"error,omitempty"`
 	Operations map[Operation]ProviderOperationCapability `json:"operations,omitempty"`
+	// ObservedAt is when the provider was last probed; nil if it never was.
+	ObservedAt *time.Time `json:"observed_at,omitempty"`
 }
 
 type ProviderOperationCapability struct {
@@ -568,18 +570,27 @@ type ProviderOperationCapability struct {
 }
 
 type SessionSnapshot struct {
-	ID         string                    `json:"id"`
-	ScopeKey   string                    `json:"scope_key"`
-	CreatedAt  time.Time                 `json:"created_at"`
-	ExpiresAt  time.Time                 `json:"expires_at"`
-	Request    *SearchRequest            `json:"request,omitempty"`
-	Candidates []Candidate               `json:"candidates"`
-	Artifacts  []Artifact                `json:"artifacts"`
-	Relations  []Relation                `json:"relations"`
-	Frontiers  map[SourceID]Continuation `json:"frontiers"`
-	SourceRuns []SourceRun               `json:"source_runs"`
-	Budget     BudgetState               `json:"budget"`
-	Events     []RetrievalEvent          `json:"events,omitempty"`
+	ID         string         `json:"id"`
+	ScopeKey   string         `json:"scope_key"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  time.Time      `json:"expires_at"`
+	Request    *SearchRequest `json:"request,omitempty"`
+	Candidates []Candidate    `json:"candidates"`
+	// LatestSearchCandidateIDs lists the canonical IDs belonging to the most
+	// recent Search in this session. Sessions are append-only, so older
+	// searches' candidates stay in Candidates; Continue ranks and returns only
+	// the latest search's scope. Nil (snapshots written before the field
+	// existed) means the scope is unknown and callers fall back to treating
+	// all candidates as the latest search's; an empty non-nil list means the
+	// latest search matched nothing. No omitempty so JSON round-trips keep
+	// nil and empty distinct (null vs []).
+	LatestSearchCandidateIDs []string                  `json:"latest_search_candidate_ids"`
+	Artifacts                []Artifact                `json:"artifacts"`
+	Relations                []Relation                `json:"relations"`
+	Frontiers                map[SourceID]Continuation `json:"frontiers"`
+	SourceRuns               []SourceRun               `json:"source_runs"`
+	Budget                   BudgetState               `json:"budget"`
+	Events                   []RetrievalEvent          `json:"events,omitempty"`
 }
 
 func CloneJSON[T any](in T) T {

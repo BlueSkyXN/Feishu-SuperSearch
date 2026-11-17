@@ -36,7 +36,7 @@ func TestDemoProvidersSearchPaginationAndFilters(t *testing.T) {
 		t.Fatalf("search metadata=%+v", first.Candidates[0])
 	}
 	second, err := tasks.Search(context.Background(), kernel.ProviderSearchRequest{Query: "测试", PageSize: 1, Cursor: first.NextCursor})
-	if err != nil || len(second.Candidates) != 1 || second.HasMore || second.Candidates[0].NativeRank != 2 {
+	if err != nil || len(second.Candidates) != 1 || second.HasMore || second.Candidates[0].NativeRank != 1 {
 		t.Fatalf("second page=%+v err=%v", second, err)
 	}
 

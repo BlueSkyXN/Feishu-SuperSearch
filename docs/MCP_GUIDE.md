@@ -12,6 +12,8 @@ sfs --backend mock mcp
 sfs --backend larkcli --profile work --as user mcp
 ```
 
+`--profile`、`--as` 是工具调用的默认身份：调用参数省略 `identity` 或其中的 `profile`、`mode` 时，使用启动时的值。启动时显式给出的值同时限定了范围，调用参数要求其他 profile 或 mode 时返回 `identity_required`（`subtype=identity_pinned`）；启动时未给出的字段由调用参数选择。
+
 MCP 使用 stdio：
 
 - stdin：MCP 请求；
@@ -19,6 +21,8 @@ MCP 使用 stdio：
 - stderr：宿主可收集的诊断信息。
 
 不要通过会向 stdout 打日志的 shell 包装器启动 MCP。
+
+`tools/call` 并发执行，最多同时 4 个，响应按 `id` 对应，顺序不保证与请求一致；其他请求按收到的顺序立即应答。发送 `notifications/cancelled`（`params.requestId`）可取消进行中的调用，被取消的调用不再返回响应。
 
 ## 2. 工具列表
 
