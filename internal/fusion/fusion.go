@@ -253,6 +253,8 @@ func Fuse(query string, all []kernel.Candidate, limit int, cfg Config, scope str
 		}
 		return items[i].FusedScore > items[j].FusedScore
 	})
+	// Clamp the caller limit to the pool size before it is used as an
+	// allocation capacity, so the allocation stays bounded by actual data.
 	if limit <= 0 || limit > len(items) {
 		limit = len(items)
 	}

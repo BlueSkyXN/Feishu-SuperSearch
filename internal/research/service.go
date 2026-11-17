@@ -472,6 +472,9 @@ func invalidPlan(nodeID, message string) error {
 
 func (s Service) fetchReranked(ctx context.Context, req Request, sessionID string, candidates []kernel.Candidate, artifacts []kernel.Artifact) ([]kernel.Artifact, []string) {
 	limit := normalizedResearchFetchTopK(req.UserRequest, req.Budget)
+	// Clamp the request-derived limit at the allocation site: it can never
+	// legitimately exceed the candidate list, and normalizedResearchFetchTopK
+	// already bounds it by the fetch budget.
 	if limit > len(candidates) {
 		limit = len(candidates)
 	}
