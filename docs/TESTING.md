@@ -67,11 +67,11 @@ make coverage
 
 核心范围由 `scripts/check-coverage.py` 定义，包括 Engine、Plan Executor、Research、Budget、Session、Plan Validation、Synthesis 和 Planner。不能通过 Make 参数降低门槛。
 
-当前工作区最近一次 atomic profile 为：
+2026-11-17 本机 atomic profile 为：
 
 ```text
-整仓 71.9%（5412/7528）
-核心 76.5%（2156/2819）
+整仓 75.8%（6229/8215）
+核心 84.1%（2687/3194）
 ```
 
 该结果说明本机当前代码通过 gate；代码变化后必须重新生成 profile，且不能把它当作 exact-head GitHub CI 结果。

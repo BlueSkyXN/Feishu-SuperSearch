@@ -329,6 +329,10 @@ func TestSchedulerAndCollectionHelpers(t *testing.T) {
 		t.Fatalf("failed dependency ready=%v skip=%v", ready, skip)
 	}
 	node.Optional = true
+	if ready, skip := dependencyState(node, runtime); ready || !skip {
+		t.Fatalf("optional child must still respect a failed required parent: ready=%v skip=%v", ready, skip)
+	}
+	runtime["b"].node.Optional = true
 	if ready, skip := dependencyState(node, runtime); !ready || skip {
 		t.Fatalf("optional dependency ready=%v skip=%v", ready, skip)
 	}
@@ -500,5 +504,109 @@ func TestLimitHonorsMaxItemsAndTopK(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMergeFetchSelectionIsDeterministic(t *testing.T) {
+	c1, c2 := planCandidate("one", kernel.KindDocument), planCandidate("two", kernel.KindDocument)
+	deps := map[string]kernel.NodeResult{"a": {Candidates: []kernel.Candidate{c1}}, "b": {Candidates: []kernel.Candidate{c2}}}
+	k := &executionKernel{fetchFn: func(_ context.Context, r kernel.FetchBatchRequest) (kernel.ArtifactBatch, error) {
+		a := planArtifact(r.Items[0].Ref)
+		return kernel.ArtifactBatch{Items: []kernel.ArtifactResult{{Artifact: &a}}}, nil
+	}}
+	executor := New(k, 1)
+	plan := kernel.RetrievalPlan{}
+	seen := map[string]int{}
+	for range 128 {
+		merged, _ := executor.executeNode(context.Background(), plan, kernel.PlanNode{ID: "merged", Op: kernel.PlanMerge}, deps, "sid")
+		fetched, _ := executor.executeNode(context.Background(), plan, kernel.PlanNode{ID: "fetch", Op: kernel.PlanMapFetch, MaxItems: 1, Request: json.RawMessage(`{"top_k":1}`)}, map[string]kernel.NodeResult{"merged": merged}, "sid")
+		if len(fetched.Artifacts) != 1 {
+			t.Fatalf("fetch=%+v", fetched)
+		}
+		seen[fetched.Artifacts[0].Ref.NativeID]++
+	}
+	t.Logf("same dependency results, selected objects over 128 runs=%v", seen)
+	if len(seen) != 1 || seen["one"] != 128 {
+		t.Fatal("Merge changed which object map_fetch selected")
+	}
+}
+
+func TestEmptyMapFetchDoesNotCallKernel(t *testing.T) {
+	k := &executionKernel{fetchFn: func(context.Context, kernel.FetchBatchRequest) (kernel.ArtifactBatch, error) {
+		t.Error("empty map_fetch called Fetch")
+		return kernel.ArtifactBatch{}, nil
+	}}
+	for _, candidates := range [][]kernel.Candidate{nil, {{Ref: kernel.ObjectRef{NativeID: "unreadable"}}}} {
+		result, sid := New(k, 1).executeNode(context.Background(), kernel.RetrievalPlan{}, kernel.PlanNode{ID: "fetch", Op: kernel.PlanMapFetch, Request: json.RawMessage(`{"top_k":1}`)}, map[string]kernel.NodeResult{"search": {Candidates: candidates}}, "sid")
+		if result.State != kernel.NodeEmpty || result.Error != nil || sid != "sid" {
+			t.Fatalf("empty fetch=%+v sid=%s", result, sid)
+		}
+	}
+}
+
+func TestEqualPriorityNodesFollowDeclarationOrder(t *testing.T) {
+	for range 32 {
+		var order []string
+		k := &executionKernel{searchFn: func(_ context.Context, request kernel.SearchRequest) (kernel.SearchSnapshot, error) {
+			order = append(order, request.Query)
+			return kernel.SearchSnapshot{Candidates: []kernel.Candidate{planCandidate(request.Query, kernel.KindDocument)}}, nil
+		}}
+		plan := kernel.RetrievalPlan{Version: "retrieval-plan/v1", Nodes: []kernel.PlanNode{
+			{ID: "z", Op: kernel.PlanSearch, Request: json.RawMessage(`{"query":"z"}`)},
+			{ID: "a", Op: kernel.PlanSearch, Request: json.RawMessage(`{"query":"a"}`)},
+			{ID: "child_z", Op: kernel.PlanSearch, DependsOn: []string{"a", "z"}, Request: json.RawMessage(`{"query":"child_z"}`)},
+			{ID: "child_a", Op: kernel.PlanSearch, DependsOn: []string{"a", "z"}, Request: json.RawMessage(`{"query":"child_a"}`)},
+		}}
+		events, results, err := New(k, 1).Execute(context.Background(), plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range events {
+		}
+		result := <-results
+		if result.Partial || strings.Join(order, ",") != "z,a,child_z,child_a" {
+			t.Fatalf("order=%v partial=%v", order, result.Partial)
+		}
+	}
+}
+
+func TestMixedDependencyFailuresRespectParentOptionalFlag(t *testing.T) {
+	for _, requiredFails := range []bool{false, true} {
+		for _, state := range []kernel.NodeState{kernel.NodeFailed, kernel.NodeCancelled, kernel.NodeSkipped} {
+			runtime := map[string]*runtimeNode{
+				"optional": {node: kernel.PlanNode{Optional: true}, state: state},
+				"required": {state: kernel.NodeSucceeded},
+			}
+			if requiredFails {
+				runtime["required"].state = state
+			}
+			ready, skip := dependencyState(kernel.PlanNode{Op: kernel.PlanSearch, Optional: true, DependsOn: []string{"optional", "required"}}, runtime)
+			if ready == requiredFails || skip != requiredFails {
+				t.Fatalf("requiredFails=%v state=%s ready=%v skip=%v", requiredFails, state, ready, skip)
+			}
+		}
+	}
+}
+func TestOptionalFailureDoesNotBlockDependent(t *testing.T) {
+	k := &executionKernel{searchFn: func(_ context.Context, r kernel.SearchRequest) (kernel.SearchSnapshot, error) {
+		if r.Query == "bad" {
+			return kernel.SearchSnapshot{}, &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "optional source failed"}
+		}
+		return kernel.SearchSnapshot{SessionID: "rs_ok", Candidates: []kernel.Candidate{planCandidate("good", kernel.KindDocument)}}, nil
+	}}
+	plan := kernel.RetrievalPlan{Version: "retrieval-plan/v1", Nodes: []kernel.PlanNode{
+		{ID: "optional", Op: kernel.PlanSearch, Optional: true, Request: json.RawMessage(`{"query":"bad"}`)},
+		{ID: "required", Op: kernel.PlanSearch, DependsOn: []string{"optional"}, Request: json.RawMessage(`{"query":"good"}`)},
+	}, Output: []string{"required"}}
+	events, results, err := New(k, 1).Execute(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+	result := <-results
+	t.Logf("optional node=%s, downstream node=%s", result.Nodes["optional"].State, result.Nodes["required"].State)
+	if result.Nodes["required"].State != kernel.NodeSucceeded {
+		t.Fatal("upstream optional=true was ignored by dependency scheduling")
 	}
 }

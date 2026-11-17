@@ -111,7 +111,8 @@ func (e *Executor) run(ctx context.Context, plan kernel.RetrievalPlan, events ch
 	retries := &retryHeap{}
 	heap.Init(retries)
 	seq := 0
-	for id, n := range runtime {
+	for _, declared := range plan.Nodes {
+		id, n := declared.ID, runtime[declared.ID]
 		if n.state == kernel.NodeReady {
 			heap.Push(ready, nodeItem{id: id, priority: n.node.Priority, seq: seq})
 			seq++
@@ -231,7 +232,8 @@ func (e *Executor) run(ctx context.Context, plan kernel.RetrievalPlan, events ch
 			for _, artifact := range done.result.Artifacts {
 				emit(kernel.EventArtifactUpsert, done.id, map[string]any{"artifact": artifact})
 			}
-			for _, candidate := range runtime {
+			for _, declared := range plan.Nodes {
+				candidate := runtime[declared.ID]
 				if candidate.state != kernel.NodeBlocked {
 					continue
 				}
@@ -382,11 +384,9 @@ func (e *Executor) executeNode(ctx context.Context, plan kernel.RetrievalPlan, n
 		base.Value = refs
 		return base, sessionID
 	case kernel.PlanMerge:
-		for _, d := range deps {
-			base.Candidates = append(base.Candidates, d.Candidates...)
-			base.Artifacts = append(base.Artifacts, d.Artifacts...)
-			base.Relations = append(base.Relations, d.Relations...)
-		}
+		base.Candidates = depCandidates(deps)
+		base.Artifacts = depArtifacts(deps)
+		base.Relations = depRelations(deps)
 		return base, sessionID
 	case kernel.PlanDedup:
 		cands := depCandidates(deps)
@@ -479,6 +479,10 @@ func (e *Executor) executeNode(ctx context.Context, plan kernel.RetrievalPlan, n
 				continue
 			}
 			items = append(items, kernel.FetchRequest{Ref: c.Ref, Projection: p})
+		}
+		if len(items) == 0 {
+			base.State = kernel.NodeEmpty
+			return base, sessionID
 		}
 		batch, err := e.kernel.Fetch(ctx, kernel.FetchBatchRequest{SessionID: sessionID, Identity: plan.Identity, Items: items, Budget: plan.Budget})
 		if err != nil && len(batch.Items) == 0 {
@@ -617,7 +621,7 @@ func dependencyState(n kernel.PlanNode, runtime map[string]*runtimeNode) (ready 
 		if !isTerminal(d.state) {
 			return false, false
 		}
-		if (d.state == kernel.NodeFailed || d.state == kernel.NodeCancelled || d.state == kernel.NodeSkipped) && !n.Optional && !acceptsPartial(n.Op) {
+		if (d.state == kernel.NodeFailed || d.state == kernel.NodeCancelled || d.state == kernel.NodeSkipped) && !d.node.Optional && !acceptsPartial(n.Op) {
 			return false, true
 		}
 	}

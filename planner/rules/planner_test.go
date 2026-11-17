@@ -65,7 +65,7 @@ func TestSourceQueriesAndCompactionBoundaries(t *testing.T) {
 	if got := sourceQueries("short", nil); got != nil {
 		t.Fatalf("no sources should produce no overrides: %v", got)
 	}
-	if got := compactQuery(" 请帮我  搜索 A 项目 最近一周 "); got != "A 项目" {
+	if got := compactQuery(" 请帮我  搜索 A 项目 最近一周 "); got != "A 项目 最近一周" {
 		t.Fatalf("compact=%q", got)
 	}
 	if got := compactQuery("请帮我"); got != "请帮我" {
@@ -73,6 +73,24 @@ func TestSourceQueriesAndCompactionBoundaries(t *testing.T) {
 	}
 	if !containsAny("abc", "x", "b") || containsAny("abc", "x", "y") {
 		t.Fatal("containsAny mismatch")
+	}
+}
+
+func TestCompactionPreservesBusinessWordsAndQualifiers(t *testing.T) {
+	for _, query := range []string{"请假申请制度", "API 请求错误", "需求分析报告", "搜索系统设计", "总结报告", "最近一个月的审批申请"} {
+		if got := compactQuery(query); got != query {
+			t.Errorf("query=%q got=%q", query, got)
+		}
+	}
+	for query, want := range map[string]string{
+		"请帮我搜索请假申请制度":   "请假申请制度",
+		"请分析需求分析报告":     "需求分析报告",
+		"搜索：API 请求错误":   "API 请求错误",
+		"帮我 查找 最近一周的申请": "最近一周的申请",
+	} {
+		if got := compactQuery(query); got != want {
+			t.Errorf("query=%q got=%q want=%q", query, got, want)
+		}
 	}
 }
 

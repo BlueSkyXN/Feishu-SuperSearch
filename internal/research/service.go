@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/ai"
 	budgetctl "github.com/BlueSkyXN/Feishu-SuperSearch/internal/budget"
@@ -63,7 +64,21 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		return Result{}, err
 	}
 	emit(progressEvent(PhasePlanning, "正在生成受限检索计划"))
-	plan, err := p.Plan(ctx, req.UserRequest, caps)
+	var plan kernel.RetrievalPlan
+	if constrained, ok := p.(planner.PolicyPlanner); ok {
+		operations := []kernel.PlanOp{kernel.PlanSearch, kernel.PlanMerge, kernel.PlanDedup, kernel.PlanRank, kernel.PlanLimit, kernel.PlanProject}
+		if req.Deep {
+			operations = append(operations, kernel.PlanMapFetch)
+		}
+		plan, err = constrained.PlanWithPolicy(ctx, req.UserRequest, caps, planner.PlanPolicy{
+			AllowedOperations: operations,
+			Validate: func(plan kernel.RetrievalPlan) (kernel.RetrievalPlan, error) {
+				return constrainPlan(plan, req.UserRequest, caps)
+			},
+		})
+	} else {
+		plan, err = p.Plan(ctx, req.UserRequest, caps)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -88,6 +103,7 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 
 	candidates := make([]kernel.Candidate, 0)
 	artifacts := make([]kernel.Artifact, 0)
+	var relations []kernel.Relation
 	seenCandidates := map[string]bool{}
 	seenArtifacts := map[string]bool{}
 	outputIDs := plan.Output
@@ -96,12 +112,14 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		for id := range planResult.Output {
 			outputIDs = append(outputIDs, id)
 		}
+		sort.Strings(outputIDs)
 	}
 	for _, id := range outputIDs {
 		n, exists := planResult.Output[id]
 		if !exists {
 			n = planResult.Nodes[id]
 		}
+		relations = append(relations, n.Relations...)
 		for _, c := range n.Candidates {
 			key := c.Ref.CanonicalID
 			if key == "" {
@@ -120,22 +138,15 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 			if !seenArtifacts[key] {
 				seenArtifacts[key] = true
 				artifacts = append(artifacts, a)
+				relations = append(relations, a.Relations...)
 			}
 		}
 	}
 	var sourceRuns []kernel.SourceRun
-	var relations []kernel.Relation
 	warnings := []string{}
 	if planResult.SessionID != "" {
 		if snap, e := s.Kernel.Session(ctx, planResult.SessionID, req.Identity); e == nil {
 			sourceRuns = snap.SourceRuns
-			relations = snap.Relations
-			if len(candidates) == 0 {
-				candidates = snap.Candidates
-			}
-			if len(artifacts) == 0 {
-				artifacts = snap.Artifacts
-			}
 		}
 	}
 	for _, artifact := range artifacts {
@@ -175,6 +186,7 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 					if !seenArtifacts[key] {
 						seenArtifacts[key] = true
 						artifacts = append(artifacts, artifact)
+						relations = append(relations, artifact.Relations...)
 					}
 				}
 			}
@@ -187,7 +199,13 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 	ap := synthesis.ArtifactPack{SessionID: planResult.SessionID, Artifacts: artifacts, Relations: relations}
 	emit(progressEvent(PhaseEvidence, "正在提取可追溯证据"))
 	ep := synthesis.ExtractEvidence(req.Query, ap)
-	result := Result{Planner: p.Name(), Plan: plan, PlanResult: planResult, CandidatePack: cp, ArtifactPack: ap, EvidencePack: ep, Summary: synthesis.Summarize(ep), Events: events, Warnings: warnings}
+	plannerName := p.Name()
+	if plan.Metadata["fallback_from"] == plannerName {
+		if fallbackName, ok := plan.Metadata["planner"].(string); ok && fallbackName != "" {
+			plannerName = fallbackName
+		}
+	}
+	result := Result{Planner: plannerName, Plan: plan, PlanResult: planResult, CandidatePack: cp, ArtifactPack: ap, EvidencePack: ep, Summary: synthesis.Summarize(ep), Events: events, Warnings: warnings}
 	emit(progressEvent(PhaseResearchComplete, "证据包已生成"))
 	return result, nil
 }

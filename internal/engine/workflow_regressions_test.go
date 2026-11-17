@@ -328,7 +328,7 @@ func TestResearchRerankContinuesConsumedBudget(t *testing.T) {
 func TestResearchRulesPassCompactedQueryToProvider(t *testing.T) {
 	for _, tc := range []struct{ query, want string }{
 		{"请帮我搜索项目延期", "项目延期"},
-		{"请帮我搜索最近一个月关于项目延期原因以及相关会议讨论和未完成任务的资料", "关于项目延期原因以及相关会议讨论和未完成任务的资料"},
+		{"请帮我搜索最近一个月关于项目延期原因以及相关会议讨论和未完成任务的资料", "最近一个月关于项目延期原因以及相关会议讨论和未完成任务的资料"},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			p := &workflowProvider{}

@@ -329,6 +329,10 @@ func (e *Engine) searchOne(ctx context.Context, rec *session.Record, req kernel.
 		// with the continuation cursor.
 		result.run.Status = statusForError(err)
 		result.run.Error = kernel.DetailFromError(err)
+	} else if enrichment := pageEnrichmentError(page); enrichment != nil {
+		result.run.Pages = 1
+		result.run.Status = kernel.StatusPartial
+		result.run.Error = enrichment
 	} else if len(page.Candidates) == 0 {
 		result.run.Pages = 1
 		result.run.Status = kernel.StatusEmpty
@@ -430,15 +434,17 @@ func mergeRuns(m map[kernel.SourceID]kernel.SourceRun, results []sourcePageResul
 			// has now delivered what was previously truncated. The aggregate
 			// status reflects everything read so far, so a source with
 			// accumulated hits stays ok even when this page was empty.
-			old.Error = nil
-			if old.HitCount > 0 {
+			old.Error = carryEnrichment(old.Error, nil)
+			if old.Error != nil {
+				old.Status = kernel.StatusPartial
+			} else if old.HitCount > 0 {
 				old.Status = kernel.StatusOK
 			} else {
 				old.Status = r.run.Status
 			}
 		} else if r.run.Status == kernel.StatusPartial {
 			old.Status = kernel.StatusPartial
-			old.Error = r.run.Error
+			old.Error = carryEnrichment(old.Error, r.run.Error)
 		} else {
 			// Any other page outcome is a failure. It does not undo the
 			// results of earlier pages, and it must not be reported as ok:
@@ -448,14 +454,14 @@ func mergeRuns(m map[kernel.SourceID]kernel.SourceRun, results []sourcePageResul
 			if earlierHits > 0 {
 				old.Status = kernel.StatusPartial
 			}
-			old.Error = r.run.Error
+			old.Error = carryEnrichment(old.Error, r.run.Error)
 		}
 		m[r.source] = old
 	}
 }
 func mergeFrontiers(m map[kernel.SourceID]kernel.Continuation, results []sourcePageResult) {
 	for _, r := range results {
-		if r.run.Status != kernel.StatusOK && r.run.Status != kernel.StatusEmpty {
+		if r.run.Pages == 0 {
 			// The page did not advance: keep the last valid cursor and page
 			// count so a retry continues from where the source actually is,
 			// and never adopt an empty cursor from a failed call.

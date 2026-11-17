@@ -114,6 +114,17 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 			return
 		}
 		artifact.Ref = mergeRef(work.req.Ref, artifact.Ref)
+		relations := make([]kernel.Relation, 0, len(artifact.Relations))
+		for _, relation := range artifact.Relations {
+			relation.From = normalizeRelationRef(relation.From, artifact.Ref, req.Identity)
+			relation.To = normalizeRelationRef(relation.To, kernel.ObjectRef{}, req.Identity)
+			if relation.From.Validate() != nil || relation.To.Validate() != nil || validateRefIdentity(relation.From, req.Identity) != nil || validateRefIdentity(relation.To, req.Identity) != nil {
+				results[work.index] = kernel.ArtifactResult{Ref: work.req.Ref, Error: &kernel.ErrorDetail{Type: kernel.ErrVersionIncompatible, Message: "provider returned an invalid relation reference"}, Shared: shared}
+				return
+			}
+			relations = append(relations, relation)
+		}
+		artifact.Relations = mergeRelations(nil, relations)
 		// The response must cover everything this request asked for: merge in
 		// what this request's earlier fetchers materialized (fresh) and what
 		// was already cached when the request started (ss). fresh stays the
@@ -196,7 +207,7 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 					itemErr := error(nil)
 					if !ok {
 						if callErr != nil {
-							itemErr = callErr
+							itemErr = fetchObjectError(callErr, work.req.Ref)
 						} else {
 							itemErr = &kernel.ErrorDetail{Type: kernel.ErrNotFound, ProviderID: work.provider.Descriptor().ID, Source: work.provider.Descriptor().Source, Message: "provider returned no artifact for requested object"}
 						}
@@ -230,6 +241,7 @@ func (e *Engine) Fetch(ctx context.Context, req kernel.FetchBatchRequest) (kerne
 				a = mergeArtifact(current, a)
 			}
 			r.Artifacts[id] = a
+			r.Relations = mergeRelations(r.Relations, a.Relations)
 		}
 		r.Budget = state
 	})
@@ -262,6 +274,15 @@ func knownSessionRef(snapshot kernel.SessionSnapshot, requested kernel.ObjectRef
 	}
 	for _, artifact := range snapshot.Artifacts {
 		refs = append(refs, artifact.Ref)
+		// Older snapshots may contain relations only inside Artifact.
+		identity := kernel.Identity{ScopeKey: snapshot.ScopeKey}.Normalized()
+		for _, relation := range artifact.Relations {
+			for _, ref := range []kernel.ObjectRef{normalizeRelationRef(relation.From, artifact.Ref, identity), normalizeRelationRef(relation.To, kernel.ObjectRef{}, identity)} {
+				if ref.Validate() == nil && validateRefIdentity(ref, identity) == nil {
+					refs = append(refs, ref)
+				}
+			}
+		}
 	}
 	for _, relation := range snapshot.Relations {
 		refs = append(refs, relation.From, relation.To)

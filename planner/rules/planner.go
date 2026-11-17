@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/planner"
@@ -122,13 +123,46 @@ func containsAny(s string, terms ...string) bool {
 func compactQuery(q string) string {
 	original := strings.TrimSpace(q)
 	q = original
-	repl := []string{"请帮我", "帮我", "请", "搜索", "查找", "找一下", "总结", "分析", "告诉我", "最近两周", "最近一周", "最近一个月"}
-	for _, x := range repl {
-		q = strings.ReplaceAll(q, x, " ")
+	polite := false
+	for _, prefix := range []string{"麻烦帮我", "请帮我", "帮我"} {
+		if strings.HasPrefix(q, prefix) {
+			q = trimInstructionSeparator(strings.TrimPrefix(q, prefix))
+			polite = true
+			break
+		}
+	}
+	actions := []string{"找一下", "告诉我", "搜索", "查找", "检索", "总结", "分析"}
+	// A bare 请 can be part of 请假 or 请求. Only consume it when it
+	// introduces an explicit action; never remove words inside the query.
+	if !polite && strings.HasPrefix(q, "请") {
+		rest := trimInstructionSeparator(strings.TrimPrefix(q, "请"))
+		for _, action := range actions {
+			if strings.HasPrefix(rest, action) {
+				q, polite = rest, true
+				break
+			}
+		}
+	}
+	for _, action := range actions {
+		if rest, found := strings.CutPrefix(q, action); found && (polite || hasInstructionSeparator(rest)) {
+			q = trimInstructionSeparator(rest)
+			break
+		}
 	}
 	q = strings.Join(strings.Fields(q), " ")
 	if q == "" {
 		return original
 	}
 	return q
+}
+
+func trimInstructionSeparator(s string) string {
+	return strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsSpace(r) || r == ':' || r == '：' || r == '，' || r == ',' })
+}
+
+func hasInstructionSeparator(s string) bool {
+	for _, r := range s {
+		return unicode.IsSpace(r) || r == ':' || r == '：'
+	}
+	return false
 }

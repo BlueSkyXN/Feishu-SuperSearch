@@ -251,13 +251,15 @@ planned
    └─ cancelled
 ```
 
-`optional=true` 的节点失败时，依赖节点仍可根据已有输入运行；非 optional 失败可能使依赖节点跳过。
+`optional=true` 的上游节点失败、取消或跳过时，依赖节点仍可根据已有输入运行；必需上游失败会阻止不支持部分输入的依赖节点。下游自己的 `optional` 标志用于判断它失败后对后续节点的影响。失败仍记录在节点结果与计划 `partial` 中。
+
+`map_fetch` 没有可读取候选时返回 `empty`，不发起空 Fetch。`merge` 按依赖节点 ID 排序后拼接候选、Artifact 与关系，使下游 Top-K 选择有稳定顺序。
 
 ## 7. 调度
 
 执行器使用：
 
-- Ready Max-Heap：优先级高的节点先运行；
+- Ready Max-Heap：优先级高的节点先运行，同时进入队列且优先级相同的节点按计划声明顺序入队；
 - Retry Min-Heap：到达下一次重试时间后重新进入 Ready；
 - 全局 semaphore：限制并发；
 - 共享 Budget Ledger：原子扣减调用、Fetch、Expand 与字节预算；

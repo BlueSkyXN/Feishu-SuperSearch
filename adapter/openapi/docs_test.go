@@ -100,6 +100,14 @@ func TestClientRedactsOpenAPIErrorPayloads(t *testing.T) {
 		wantLogID string
 	}{
 		{
+			name:      "missing object",
+			status:    http.StatusNotFound,
+			body:      `{"msg":"` + sentinel + `","log_id":"log_404"}`,
+			wantType:  kernel.ErrNotFound,
+			wantCode:  http.StatusNotFound,
+			wantLogID: "log_404",
+		},
+		{
 			name:      "http status",
 			status:    http.StatusForbidden,
 			body:      `{"msg":"` + sentinel + `","error":{"token":"` + sentinel + `"},"data":{"tenant":"` + sentinel + `"},"log_id":"log_123"}`,

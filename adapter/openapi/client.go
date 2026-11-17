@@ -120,6 +120,9 @@ func (c *Client) Call(ctx context.Context, method, path string, body any) (map[s
 	if resp.StatusCode == http.StatusForbidden {
 		return nil, newPublicOpenAPIError(kernel.ErrMissingScope, resp.StatusCode, openAPILogIDFromRaw(raw))
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, newPublicOpenAPIError(kernel.ErrNotFound, resp.StatusCode, openAPILogIDFromRaw(raw))
+	}
 	if resp.StatusCode >= 500 {
 		return nil, newPublicOpenAPIError(kernel.ErrUpstreamTransient, resp.StatusCode, openAPILogIDFromRaw(raw))
 	}
@@ -219,6 +222,8 @@ func newPublicOpenAPIError(t kernel.ErrorType, code int, logID string) *kernel.E
 
 func publicOpenAPIError(t kernel.ErrorType) (string, string) {
 	switch t {
+	case kernel.ErrNotFound:
+		return "Feishu OpenAPI could not find the requested object", "verify the object ID and its visibility to the selected identity"
 	case kernel.ErrMissingScope:
 		return "Feishu OpenAPI reported a missing permission scope", "verify the read-only scopes for the selected identity"
 	case kernel.ErrIdentityRequired:

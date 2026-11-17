@@ -66,18 +66,14 @@ func (p *MessagesProvider) Search(ctx context.Context, request kernel.ProviderSe
 	}
 	ids := messageIDs(data)
 	details := map[string]map[string]any{}
-	if len(ids) > 0 {
-		if messages, fetchErr := p.mget(ctx, ids); fetchErr == nil {
-			for _, message := range messages {
-				if id := findString(message, []string{"message_id", "id"}); id != "" {
-					details[id] = message
-				}
-			}
-		} else {
-			data["enrichment_error"] = kernel.DetailFromError(fetchErr)
-		}
+	messages, failures := p.mget(ctx, ids)
+	for _, message := range messages {
+		details[findString(message, []string{"message_id", "id"})] = message
 	}
 	page := kernel.CandidatePage{RawCount: len(ids), NextCursor: findString(data, []string{"page_token", "next_page_token"}), HasMore: findBool(data, []string{"has_more"}), Metadata: map[string]any{"backend": "openapi"}}
+	if enrichmentErr := messageBatchError(ids, failures, "partial_enrichment"); enrichmentErr != nil {
+		page.Metadata["enrichment_error"] = kernel.DetailFromError(enrichmentErr)
+	}
 	if page.NextCursor != "" {
 		page.HasMore = true
 	}
@@ -103,10 +99,7 @@ func (p *MessagesProvider) Fetch(ctx context.Context, requests []kernel.Provider
 		ids = append(ids, request.Ref.NativeID)
 		requestByID[request.Ref.NativeID] = request
 	}
-	messages, err := p.mget(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
+	messages, failures := p.mget(ctx, ids)
 	artifacts := make([]kernel.Artifact, 0, len(messages))
 	for _, message := range messages {
 		id := findString(message, []string{"message_id", "id"})
@@ -136,11 +129,12 @@ func (p *MessagesProvider) Fetch(ctx context.Context, requests []kernel.Provider
 			artifact.Projection |= kernel.ProjectionRelations
 		}
 		if !artifact.Projection.Has(projection) {
-			return nil, &kernel.ErrorDetail{Type: kernel.ErrVersionIncompatible, ProviderID: "openapi.messages", Source: kernel.SourceMessages, Message: "message response did not materialize the requested projection", Details: map[string]any{"missing_projection": projection.Missing(artifact.Projection).Strings()}}
+			failures[id] = &kernel.ErrorDetail{Type: kernel.ErrVersionIncompatible, ProviderID: "openapi.messages", Source: kernel.SourceMessages, Message: "message response did not materialize the requested projection", Details: map[string]any{"missing_projection": projection.Missing(artifact.Projection).Strings()}}
+			continue
 		}
 		artifacts = append(artifacts, artifact)
 	}
-	return artifacts, nil
+	return artifacts, messageBatchError(ids, failures, "partial_fetch")
 }
 
 var feishuDocumentURL = regexp.MustCompile(`https?://(?:[A-Za-z0-9-]+\.)*(?:feishu\.cn|larksuite\.com)/(?:docx|docs|wiki|sheets)/([A-Za-z0-9_-]+)[^\s"'<>]*`)
@@ -176,19 +170,16 @@ func (p *MessagesProvider) Expand(ctx context.Context, request kernel.ProviderEx
 	return artifacts[0].Relations, nil
 }
 
-func (p *MessagesProvider) mget(ctx context.Context, ids []string) ([]map[string]any, error) {
+func (p *MessagesProvider) mget(ctx context.Context, ids []string) ([]map[string]any, map[string]*kernel.ErrorDetail) {
+	failures := map[string]*kernel.ErrorDetail{}
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, failures
 	}
 	results := make([]map[string]any, len(ids))
+	errorsByIndex := make([]*kernel.ErrorDetail, len(ids))
 	jobs := make(chan int)
-	workers := 6
-	if workers > len(ids) {
-		workers = len(ids)
-	}
+	workers := min(6, len(ids))
 	var wait sync.WaitGroup
-	var errorMu sync.Mutex
-	var firstError error
 	for worker := 0; worker < workers; worker++ {
 		wait.Add(1)
 		go func() {
@@ -196,41 +187,66 @@ func (p *MessagesProvider) mget(ctx context.Context, ids []string) ([]map[string
 			for index := range jobs {
 				data, err := p.client.getMessageSDK(ctx, ids[index])
 				if err != nil {
-					errorMu.Lock()
-					if firstError == nil {
-						firstError = annotate(err, "openapi.messages", kernel.SourceMessages)
-					}
-					errorMu.Unlock()
+					errorsByIndex[index] = kernel.DetailFromError(annotate(err, "openapi.messages", kernel.SourceMessages))
 					continue
 				}
-				items := findMapSlice(data, []string{"items", "messages"})
-				if len(items) > 0 {
-					results[index] = items[0]
+				for _, item := range findMapSlice(data, []string{"items", "messages"}) {
+					if findString(item, []string{"message_id", "id"}) == ids[index] {
+						results[index] = item
+						break
+					}
 				}
 			}
 		}()
 	}
+dispatch:
 	for index := range ids {
 		select {
 		case jobs <- index:
 		case <-ctx.Done():
-			close(jobs)
-			wait.Wait()
-			return nil, annotate(sdkCallError(ctx, ctx.Err()), "openapi.messages", kernel.SourceMessages)
+			break dispatch
 		}
 	}
 	close(jobs)
 	wait.Wait()
-	if firstError != nil {
-		return nil, firstError
-	}
 	out := make([]map[string]any, 0, len(results))
-	for _, message := range results {
+	for index, message := range results {
 		if message != nil {
 			out = append(out, message)
+			continue
+		}
+		detail := errorsByIndex[index]
+		if detail == nil {
+			if ctx.Err() != nil {
+				detail = kernel.DetailFromError(annotate(sdkCallError(ctx, ctx.Err()), "openapi.messages", kernel.SourceMessages))
+			} else {
+				detail = &kernel.ErrorDetail{Type: kernel.ErrNotFound, ProviderID: "openapi.messages", Source: kernel.SourceMessages, Message: "message lookup returned no matching object"}
+			}
+		}
+		failures[ids[index]] = detail
+	}
+	return out, failures
+}
+
+func messageBatchError(ids []string, failures map[string]*kernel.ErrorDetail, subtype string) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	detail := kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, ProviderID: "openapi.messages", Source: kernel.SourceMessages}
+	for _, id := range ids {
+		if item := failures[id]; item != nil {
+			detail = *item
+			break
 		}
 	}
-	return out, nil
+	objects := make(map[string]any, len(failures))
+	for id, item := range failures {
+		objects[id] = item
+	}
+	detail.Subtype = subtype
+	detail.Message = "one or more messages could not be read"
+	detail.Details = map[string]any{"objects": objects}
+	return &detail
 }
 
 func messageIDs(data map[string]any) []string {

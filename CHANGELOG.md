@@ -14,6 +14,13 @@
 
 ### Fixed
 
+- Rules Planner 仅去除明确的指令前缀，保留“请假申请制度”“API 请求错误”“需求分析报告”等业务词及时间限定词
+- Research 只从本次计划输出和补读生成证据；复用 Session 后的空结果保持为空，本次选中的缓存正文仍可复用
+- 并发 Expand 与 Fetch 写回时合并当前 Session 关系；Fetch 返回的关联目标可直接继续读取，兼容仅在 Artifact 中保存关系的历史快照
+- Plan 的 merge 固定依赖拼接顺序，同批同优先级节点按声明顺序入队；optional 按失败上游属性判断，空 map_fetch 返回 empty
+- direct OpenAPI 消息批次保留成功正文和摘要，并传递逐对象失败与补全降级状态；HTTP 404 映射为 not_found，后续分页成功保留先前尚未恢复的补全缺失，record/replay 保持相同结果
+- AI Planner 在生成、修复和回退时使用 Research 的操作子集及调用者约束；修复请求携带具体校验原因，回退结果标明实际 Planner
+
 - 同一 Session 的并行 Search 在完成时一次性更新请求、候选归属和分页状态；过期 Continue 返回 `search_state_changed`，保留已完成的新搜索/续页状态。结构化 Query 使用自己的返回游标，不再覆盖 Search 的游标、来源状态和预算
 - Research 重排后的补读继续消耗 Plan 的剩余调用、读取和字节预算，并沿用原截止时间；返回预算包含补读消耗，补读失败或预算不足时标记 partial
 - Rules Planner 将压缩后的查询词传给所有已选来源，原始问题继续用于融合与证据，避免执行前覆盖压缩结果及部分 docs 查询错误触发长度限制

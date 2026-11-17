@@ -135,7 +135,7 @@ canonical ID
 
 所有策略受共享 `SearchBudget` 约束。`Continue` 复用 session 中的 provider cursor，不重跑第一页。
 
-后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后来源状态恢复 `ok`。来源状态表达累计结果：末页为空但此前已有命中时仍为 `ok`，全程无命中才为 `empty`。
+后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后清除该分页错误。候选页面成功、部分详情补全失败时，该页正常计数和推进游标，来源保持 `partial` 与 `partial_enrichment`；后续页面成功仍保留先前未恢复的补全缺失。来源状态表达累计结果：没有未恢复错误时，末页为空但此前已有命中仍为 `ok`，全程无命中才为 `empty`。
 
 ## 7. Fetch 流水线
 
@@ -174,7 +174,7 @@ frontier[depth=0]
 → next frontier
 ```
 
-程序上限 `max_depth=2`，并受 `max_expanded_nodes`、call/byte/deadline 约束。关系存入 Session，但执行图和业务关系图保持分离。
+程序上限 `max_depth=2`，并受 `max_expanded_nodes`、call/byte/deadline 约束。Expand 与 Fetch 得到的关系在持锁写回时合入 Session 当前集合，保留并发调用取得的关系。Fetch 返回的合法关系目标可以直接用于后续 Fetch/Expand；历史快照仅有 Artifact 内嵌关系时也可识别。执行图和业务关系图保持分离。
 
 ## 9. RetrievalPlan Executor
 
@@ -272,6 +272,10 @@ Fetch/Expand/Session
 ```
 
 Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。正文 chunk 按空行与 Markdown 标题切成不超过 600 字的段落，每个 chunk 保留与查询词重合最多的 4 段，`quote` 是段落原文，`source_span` 是它在 chunk 中的字符偏移；正文证据合计不超过 512 KiB。原生摘要与待办各成一条证据。`research` 到此为止并产生确定性 digest。
+
+Research 的候选、Artifact、关系和证据取自本次计划输出及本次重排补读。复用 Session 后，零命中保持为空；本次明确选中的缓存 Artifact 可正常返回，浅检索不自动读取历史缓存正文。
+
+Rules Planner 只清理明确的礼貌/操作前缀，保留业务词和时间限定词；改写结果通过 `source_queries` 传给 Provider，原始问题继续用于融合与证据。AI Planner 通过可选 `PlanWithPolicy` 接收 Research 的操作子集和调用者约束，在首次生成、一次修复及 Rules 回退时执行相同校验；原 `Planner.Plan` 接口保持可用。
 
 AI 位于 Kernel 外，通过三个端口接入：
 

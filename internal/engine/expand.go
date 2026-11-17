@@ -66,7 +66,6 @@ func (e *Engine) Expand(ctx context.Context, req kernel.ExpandRequest) (kernel.R
 	defer cancel()
 	frontier := []expandFrontier{{ref: req.Ref, depth: 0, root: true}}
 	visited := map[string]bool{objectKey(req.Ref): true}
-	all := append([]kernel.Relation(nil), snap.Relations...)
 	newRelations := []kernel.Relation{}
 	partialErrors := map[string]*kernel.ErrorDetail{}
 	var rootErr error
@@ -170,7 +169,6 @@ func (e *Engine) Expand(ctx context.Context, req kernel.ExpandRequest) (kernel.R
 	}
 
 	state := budget.Snapshot()
-	all = mergeRelations(all, newRelations)
 	var partial *kernel.ErrorDetail
 	if len(partialErrors) > 0 {
 		partial = &kernel.ErrorDetail{Type: kernel.ErrUpstreamPermanent, Message: "one or more relation expansions failed", Details: map[string]any{"objects": partialErrors}}
@@ -179,7 +177,7 @@ func (e *Engine) Expand(ctx context.Context, req kernel.ExpandRequest) (kernel.R
 		return kernel.RelationBatch{SessionID: rec.ID, Partial: true, Error: kernel.DetailFromError(rootErr), Budget: state}, rootErr
 	}
 	rec.WithLock(func(r *session.Record) {
-		r.Relations = all
+		r.Relations = mergeRelations(r.Relations, newRelations)
 		r.Budget = state
 	})
 	batch := kernel.RelationBatch{SessionID: rec.ID, Relations: newRelations, Partial: partial != nil, Error: partial, Budget: state}
