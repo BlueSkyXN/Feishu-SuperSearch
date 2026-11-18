@@ -20,6 +20,10 @@ type Record struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	Request   *kernel.SearchRequest
+	// SearchRevision is process-local and guarded by mu. It changes whenever
+	// Search or Continue publishes paging state, so an older Continue cannot
+	// replace the state of a newer completed operation.
+	SearchRevision uint64
 
 	Candidates map[string]kernel.Candidate
 	// LatestSearchCandidateIDs scopes Continue to the most recent Search; see
@@ -70,6 +74,15 @@ func (r *Record) WithLock(fn func(*Record))  { r.mu.Lock(); defer r.mu.Unlock();
 func (r *Record) WithRLock(fn func(*Record)) { r.mu.RLock(); defer r.mu.RUnlock(); fn(r) }
 
 func (r *Record) Snapshot(includeEvents bool) kernel.SessionSnapshot {
+	snapshot, _ := r.snapshot(includeEvents)
+	return snapshot
+}
+
+func (r *Record) SnapshotWithSearchRevision() (kernel.SessionSnapshot, uint64) {
+	return r.snapshot(false)
+}
+
+func (r *Record) snapshot(includeEvents bool) (kernel.SessionSnapshot, uint64) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	candidates := make([]kernel.Candidate, 0, len(r.Candidates))
@@ -107,7 +120,7 @@ func (r *Record) Snapshot(includeEvents bool) kernel.SessionSnapshot {
 		Artifacts:                artifacts,
 		Relations:                append([]kernel.Relation(nil), r.Relations...), Frontiers: frontiers,
 		SourceRuns: append([]kernel.SourceRun(nil), r.SourceRuns...), Budget: r.Budget, Events: events,
-	}
+	}, r.SearchRevision
 }
 
 // copyIDs clones an ID list while preserving the nil-vs-empty distinction

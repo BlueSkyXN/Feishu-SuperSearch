@@ -114,6 +114,8 @@ rrf(candidate) = Σ weight(source) / (k0 + source_rank)
 
 随后叠加有限、确定性的 lexical/recency/multi-source 信号。原生 score 只保留在 provenance，不作为跨来源可比较值。
 
+一次排序中的所有候选共用同一个时间参考，完整候选集与 Top-K 也使用同一时刻。同分时按 Canonical ID 排序；算法测试可以通过内部 `fusion.Config.ReferenceTime` 固定时间参考。
+
 去重优先：
 
 ```text
@@ -133,7 +135,7 @@ canonical ID
 
 所有策略受共享 `SearchBudget` 约束。`Continue` 复用 session 中的 provider cursor，不重跑第一页。
 
-后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后来源状态恢复 `ok`。来源状态表达累计结果：末页为空但此前已有命中时仍为 `ok`，全程无命中才为 `empty`。
+后续页面失败（含调用预算耗尽、上游错误、超时）时：已取得的候选保留，来源状态记为 `partial` 并保留具体错误；未执行或失败的页面不计入 `pages_fetched`，游标停留在最后一个成功页，因此 Continue 会从失败页重试而不会跳过数据。成功重试后清除该分页错误。候选页面成功、部分详情补全失败时，该页正常计数和推进游标，来源保持 `partial` 与 `partial_enrichment`；后续页面成功仍保留先前未恢复的补全缺失。来源状态表达累计结果：没有未恢复错误时，末页为空但此前已有命中仍为 `ok`，全程无命中才为 `empty`。
 
 ## 7. Fetch 流水线
 
@@ -172,7 +174,7 @@ frontier[depth=0]
 → next frontier
 ```
 
-程序上限 `max_depth=2`，并受 `max_expanded_nodes`、call/byte/deadline 约束。关系存入 Session，但执行图和业务关系图保持分离。
+程序上限 `max_depth=2`，并受 `max_expanded_nodes`、call/byte/deadline 约束。Expand 与 Fetch 得到的关系在持锁写回时合入 Session 当前集合，保留并发调用取得的关系。Fetch 返回的合法关系目标可以直接用于后续 Fetch/Expand；历史快照仅有 Artifact 内嵌关系时也可识别。执行图和业务关系图保持分离。
 
 ## 9. RetrievalPlan Executor
 
@@ -221,6 +223,10 @@ RetrievalEvents
 
 Session 是只增的检索工作区：Search、Query、Fetch、Expand 写入的候选、Artifact 和关系只增不删，同一计划里的多个 search 节点因此可以共用一个 Session。请求、来源游标和来源运行状态属于最近一次 Search，`Continue` 继续的是最近一次 Search；快照中的 `latest_search_candidate_ids` 记录该次搜索的候选归属（`null` 表示旧快照的归属未知、按全部候选回退；`[]` 表示该次搜索明确无结果），`Continue` 只排序和返回这一范围，更早搜索的候选仍留在 Session 里供 Fetch/Expand 使用。并发 Fetch 同一对象时，写回按 Session 当前 Artifact 合并，后完成的请求不会覆盖先完成者已保存的 projection；部分命中缓存时响应包含请求的全部 Projection，Provider 仍只读取缺失部分。无后续页的 Continue 按当前搜索的排序、limit 和配额重放结果并保留 partial 状态。
 
+同一进程内并行 Search 以最后完成的一次作为当前搜索；请求、候选归属、游标、来源状态与预算一次性更新。Continue 若在执行期间遇到另一轮 Search 或 Continue 已更新分页状态，保留新发现的历史对象并返回 `invalid_request`（`subtype=search_state_changed`），调用者应重新读取 Session 后再续查。用于检测交错的版本号只存于进程内，SQLite 和 JSON 快照格式保持兼容。
+
+结构化 Query 的分页信息由 `QuerySnapshot.continuation` 返回，下次 Query 将该游标填入 `cursor`。Query 将新候选加入工作区，但不改变已有 Search 的分页、来源状态、预算和已保存候选的名次；与 Search 重合的对象仍在 QuerySnapshot 中返回本次 Query 的完整结果。
+
 ## 11. Adapter
 
 ### lark-cli
@@ -267,6 +273,10 @@ Fetch/Expand/Session
 
 Synthesis 将候选和 Artifact 转成带稳定 ID 与 source span 的 Evidence Pack。正文 chunk 按空行与 Markdown 标题切成不超过 600 字的段落，每个 chunk 保留与查询词重合最多的 4 段，`quote` 是段落原文，`source_span` 是它在 chunk 中的字符偏移；正文证据合计不超过 512 KiB。原生摘要与待办各成一条证据。`research` 到此为止并产生确定性 digest。
 
+Research 的候选、Artifact、关系和证据取自本次计划输出及本次重排补读。复用 Session 后，零命中保持为空；本次明确选中的缓存 Artifact 可正常返回，浅检索不自动读取历史缓存正文。
+
+Rules Planner 只清理明确的礼貌/操作前缀，保留业务词和时间限定词；改写结果通过 `source_queries` 传给 Provider，原始问题继续用于融合与证据。AI Planner 通过可选 `PlanWithPolicy` 接收 Research 的操作子集和调用者约束，在首次生成、一次修复及 Rules 回退时执行相同校验；原 `Planner.Plan` 接口保持可用。
+
 AI 位于 Kernel 外，通过三个端口接入：
 
 ```text
@@ -276,3 +286,7 @@ Answerer    → 只读取 Evidence Pack，所有 claim 必须引用真实 eviden
 ```
 
 AI 默认关闭；模型故障不会使 Search 或 Research 不可用。
+
+Rules Planner 保留原始问题作为 Search 的 `query`，把压缩后的实际检索词放入每个已选来源的 `source_queries`；docs/mail 在此基础上按各自长度上限截断。
+
+Research 重排及其补读沿用已完成 Plan 的截止时间和剩余检索预算。补读的调用数、读取数和字节计入返回的 `plan_result.budget`；预算不足或补读失败时保留已取得的证据，标记 `partial` 并返回 warnings。Planner 和 Answerer 仍使用各自配置的模型超时。

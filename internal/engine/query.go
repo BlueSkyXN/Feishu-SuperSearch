@@ -74,13 +74,20 @@ func (e *Engine) Query(ctx context.Context, req kernel.QueryRequest) (kernel.Que
 	state := budget.Snapshot()
 	rec.WithLock(func(r *session.Record) {
 		for _, c := range page.Candidates {
+			if _, exists := r.Candidates[c.Ref.CanonicalID]; r.Request != nil && exists {
+				// A Query rank belongs to its own result set. Keep the saved
+				// search candidate intact for Continue; QuerySnapshot still
+				// returns the complete Query result to the caller.
+				continue
+			}
 			r.Candidates[c.Ref.CanonicalID] = c
 		}
-		if cont != nil {
-			r.Frontiers[req.Source] = *cont
+		// Query pagination belongs to this QuerySnapshot. Search/Continue own
+		// the session's paging state, including its source runs and budget.
+		if r.Request == nil {
+			r.SourceRuns = append(r.SourceRuns, run)
+			r.Budget = state
 		}
-		r.SourceRuns = append(r.SourceRuns, run)
-		r.Budget = state
 	})
 	snap := kernel.QuerySnapshot{SessionID: rec.ID, Source: req.Source, Candidates: page.Candidates, Continuation: cont, SourceRun: run, Budget: state}
 	if saveErr := e.sessions.Save(ctx, rec); saveErr != nil {

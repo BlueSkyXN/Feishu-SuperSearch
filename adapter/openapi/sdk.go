@@ -198,6 +198,8 @@ func sdkResponseData(response *larkcore.ApiResp, code int, message string, data 
 			typ = kernel.ErrIdentityRequired
 		case response.StatusCode == http.StatusForbidden:
 			typ = kernel.ErrMissingScope
+		case response.StatusCode == http.StatusNotFound:
+			typ = kernel.ErrNotFound
 		case response.StatusCode == http.StatusTooManyRequests:
 			typ = kernel.ErrRateLimited
 		case response.StatusCode >= http.StatusInternalServerError:

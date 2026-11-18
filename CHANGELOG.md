@@ -14,6 +14,19 @@
 
 ### Fixed
 
+- Rules Planner 仅去除明确的指令前缀，保留“请假申请制度”“API 请求错误”“需求分析报告”等业务词及时间限定词
+- Research 只从本次计划输出和补读生成证据；复用 Session 后的空结果保持为空，本次选中的缓存正文仍可复用
+- 并发 Expand 与 Fetch 写回时合并当前 Session 关系；Fetch 返回的关联目标可直接继续读取，兼容仅在 Artifact 中保存关系的历史快照
+- Plan 的 merge 固定依赖拼接顺序，同批同优先级节点按声明顺序入队；optional 按失败上游属性判断，空 map_fetch 返回 empty
+- direct OpenAPI 消息批次保留成功正文和摘要，并传递逐对象失败与补全降级状态；HTTP 404 映射为 not_found，后续分页成功保留先前尚未恢复的补全缺失，record/replay 保持相同结果
+- AI Planner 在生成、修复和回退时使用 Research 的操作子集及调用者约束；修复请求携带具体校验原因，回退结果标明实际 Planner
+
+- 同一 Session 的并行 Search 在完成时一次性更新请求、候选归属和分页状态；过期 Continue 返回 `search_state_changed`，保留已完成的新搜索/续页状态。结构化 Query 使用自己的返回游标，不再覆盖 Search 的游标、来源状态和预算
+- Research 重排后的补读继续消耗 Plan 的剩余调用、读取和字节预算，并沿用原截止时间；返回预算包含补读消耗，补读失败或预算不足时标记 partial
+- Rules Planner 将压缩后的查询词传给所有已选来源，原始问题继续用于融合与证据，避免执行前覆盖压缩结果及部分 docs 查询错误触发长度限制
+- 融合排序的候选共用一个时间参考，消除相同时间戳的候选因遍历顺序产生的微小分差；完整候选集与 Top-K 使用同一参考时刻
+- Plan 的 limit 节点执行 `max_items` 上限；与 `request.top_k` 同时给出时取较小值，两者均省略时保留原有 20 项默认值
+
 - 同一 Session 并发 Fetch 同一对象的不同 projection 时，后完成的请求不再覆盖先完成者：写回改为与 Session 当前 Artifact 合并，正文与摘要并集保留，随后的并集请求可命中缓存。此前两次调用都成功但 Session 只剩最后写入的 projection
 - `Continue` 只返回最近一次 Search 及其续页的候选，不再把同一 Session 中更早搜索的对象混入当前结果（含切换来源、同来源换 query 的情况）；早先候选仍留在 Session 中供 Fetch/Expand 使用。Session 快照新增 `latest_search_candidate_ids` 记录归属：`null`（旧快照、归属未知）按全部候选回退，`[]`（该次搜索明确无结果）不再混入历史候选；字段不以 omitted 序列化，nil 与空列表在内存复制、JSON 与 SQLite 恢复中全程可区分
 - 无后续页的 `Continue`（省略 sources 或来源已耗尽）按当前搜索的排序、limit 与来源配额重放结果，并依据持久化 SourceRuns 计算 `partial` 与统计字段，不再放宽限制或清除部分失败状态

@@ -150,7 +150,7 @@ func TestServiceRejectsDeepOperationsWithoutCallerAuthorization(t *testing.T) {
 	}
 }
 
-func TestServiceUsesSessionFallbackAndDefaultPlanner(t *testing.T) {
+func TestServiceDoesNotUseUnselectedSessionContent(t *testing.T) {
 	candidate := researchCandidate("session-candidate", kernel.KindDocument, kernel.ProjectionContent)
 	artifact := researchArtifact(candidate.Ref, "session evidence")
 	k := &researchKernel{
@@ -166,7 +166,7 @@ func TestServiceUsesSessionFallbackAndDefaultPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Planner != "rules" || len(result.CandidatePack.Candidates) != 1 || len(result.ArtifactPack.Artifacts) != 1 || len(result.ArtifactPack.Relations) != 1 || len(result.EvidencePack.Evidence) != 1 {
+	if result.Planner != "rules" || len(result.CandidatePack.Candidates) != 0 || len(result.ArtifactPack.Artifacts) != 0 || len(result.ArtifactPack.Relations) != 0 || len(result.EvidencePack.Evidence) != 0 {
 		t.Fatalf("result=%+v", result)
 	}
 }

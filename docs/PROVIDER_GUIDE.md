@@ -97,6 +97,8 @@ NativeScore
 5. `AvailableProjection` 只声明 Fetch 确实能补齐的内容；
 6. 原始关键字段可放 `Provenance.RawRef`，但不要放 Token。
 
+Search 页面已取得候选、部分对象的摘要或详情补全失败时，仍返回有效 `CandidatePage` 和 `nil` error，将补全错误放在 `Metadata["enrichment_error"]`（`ErrorDetail` 或等价 JSON 对象）。Kernel 保留候选，推进该页游标，并在 `SourceRun` 中标记 `partial` 与 `partial_enrichment`。后续页面成功只清除该页的失败；已消费页面的补全缺失会继续保留。
+
 ## 4. Fetch
 
 Fetcher 接收批量请求。实现应：
@@ -109,6 +111,10 @@ Fetcher 接收批量请求。实现应：
 - 对部分失败可返回已完成 Artifact + error。
 
 宿主会负责跨请求 cache、Projection 差集、批次切分与 singleflight。
+
+批次部分失败时，成功 Artifact 正常返回；聚合 `ErrorDetail.Details["objects"]` 使用 `map[string]any`，按对象 `native_id` 保存各自的 `ErrorDetail`。Kernel 将对应错误分配给缺失的对象；没有逐对象明细时使用批次错误。这些错误和成功 Artifact 可一起录制、回放。
+
+Artifact 中的关系引用会归一化、校验并合入 Session，关联目标随后可以直接 Fetch 或 Expand。历史快照只在 `Artifact.Relations` 保存关系时也可继续读取目标。
 
 ## 5. 错误分类
 

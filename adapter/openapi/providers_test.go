@@ -207,3 +207,50 @@ func TestDirectSearchRejectsMissingStableObjectIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestMessagesKeepSuccessfulBatchItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/search/v2/message":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"items":["good","bad"],"has_more":false}}`))
+		case "/open-apis/im/v1/messages/good":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"message_id":"good","chat_id":"oc_test","body":{"content":"{\"text\":\"available evidence\"}"}}]}}`))
+		case "/open-apis/im/v1/messages/bad":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":403,"msg":"test lookup failed"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(ClientConfig{AppID: "cli_test", BaseURL: server.URL, Token: "audit-token", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewMessagesProvider(client)
+	t.Run("Fetch", func(t *testing.T) {
+		refs := []kernel.ProviderFetchRequest{}
+		for _, id := range []string{"good", "bad"} {
+			refs = append(refs, kernel.ProviderFetchRequest{Ref: kernel.ObjectRef{NativeID: id, Source: kernel.SourceMessages, Kind: kernel.KindMessage}, Projection: kernel.ProjectionContent})
+		}
+		artifacts, err := p.Fetch(context.Background(), refs)
+		t.Logf("one HTTP success + one HTTP 403: artifacts=%d error=%v", len(artifacts), err)
+		if len(artifacts) != 1 || artifacts[0].Ref.NativeID != "good" {
+			t.Fatal("successful message was discarded with failed batch item")
+		}
+	})
+	t.Run("SearchEnrichment", func(t *testing.T) {
+		page, err := p.Search(context.Background(), kernel.ProviderSearchRequest{Query: "evidence", PageSize: 2, Identity: kernel.Identity{Mode: kernel.IdentityUser}})
+		nonempty := 0
+		for _, candidate := range page.Candidates {
+			if candidate.Snippet != "" {
+				nonempty++
+			}
+		}
+		t.Logf("search candidates=%d, nonempty snippets=%d, error=%v, metadata=%v", len(page.Candidates), nonempty, err, page.Metadata)
+		if nonempty != 1 {
+			t.Fatal("successful enrichment was discarded because another message lookup failed")
+		}
+	})
+}

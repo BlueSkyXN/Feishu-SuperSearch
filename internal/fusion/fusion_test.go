@@ -1,11 +1,36 @@
 package fusion
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 )
+
+func TestFuseRecencyUsesOneReferenceTime(t *testing.T) {
+	now := time.Now().UTC()
+	timestamp := now.Add(-time.Hour)
+	candidates := []kernel.Candidate{
+		{Ref: kernel.ObjectRef{NativeID: "a", Kind: kernel.KindDocument}, Source: kernel.SourceDocs, NativeRank: 1, Timestamp: &timestamp},
+		{Ref: kernel.ObjectRef{NativeID: "b", Kind: kernel.KindMessage}, Source: kernel.SourceMessages, NativeRank: 1, Timestamp: &timestamp},
+	}
+	for range 128 {
+		got, _ := Fuse("", candidates, 2, Config{}, "scope")
+		if got[0].Ref.NativeID != "a" || got[0].FusedScore != got[1].FusedScore {
+			t.Fatalf("equal ranks/timestamps must tie-break by canonical ID: %+v", got)
+		}
+	}
+	// A supplied time fixes both scores and order, including on a recency
+	// boundary, independently of the machine clock or input order.
+	cfg := Config{ReferenceTime: timestamp.Add(30 * 24 * time.Hour)}
+	want, _ := Fuse("", candidates, 2, cfg, "scope")
+	candidates[0], candidates[1] = candidates[1], candidates[0]
+	got, _ := Fuse("", candidates, 2, cfg, "scope")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("fixed reference time changed output: got=%+v want=%+v", got, want)
+	}
+}
 
 func TestFuseDeduplicatesAndCombinesDiscoveries(t *testing.T) {
 	now := time.Now().UTC()

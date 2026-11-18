@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/ai"
+	budgetctl "github.com/BlueSkyXN/Feishu-SuperSearch/internal/budget"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/planner"
 	rulesplanner "github.com/BlueSkyXN/Feishu-SuperSearch/planner/rules"
@@ -62,7 +64,21 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		return Result{}, err
 	}
 	emit(progressEvent(PhasePlanning, "正在生成受限检索计划"))
-	plan, err := p.Plan(ctx, req.UserRequest, caps)
+	var plan kernel.RetrievalPlan
+	if constrained, ok := p.(planner.PolicyPlanner); ok {
+		operations := []kernel.PlanOp{kernel.PlanSearch, kernel.PlanMerge, kernel.PlanDedup, kernel.PlanRank, kernel.PlanLimit, kernel.PlanProject}
+		if req.Deep {
+			operations = append(operations, kernel.PlanMapFetch)
+		}
+		plan, err = constrained.PlanWithPolicy(ctx, req.UserRequest, caps, planner.PlanPolicy{
+			AllowedOperations: operations,
+			Validate: func(plan kernel.RetrievalPlan) (kernel.RetrievalPlan, error) {
+				return constrainPlan(plan, req.UserRequest, caps)
+			},
+		})
+	} else {
+		plan, err = p.Plan(ctx, req.UserRequest, caps)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -87,6 +103,7 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 
 	candidates := make([]kernel.Candidate, 0)
 	artifacts := make([]kernel.Artifact, 0)
+	var relations []kernel.Relation
 	seenCandidates := map[string]bool{}
 	seenArtifacts := map[string]bool{}
 	outputIDs := plan.Output
@@ -95,12 +112,14 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		for id := range planResult.Output {
 			outputIDs = append(outputIDs, id)
 		}
+		sort.Strings(outputIDs)
 	}
 	for _, id := range outputIDs {
 		n, exists := planResult.Output[id]
 		if !exists {
 			n = planResult.Nodes[id]
 		}
+		relations = append(relations, n.Relations...)
 		for _, c := range n.Candidates {
 			key := c.Ref.CanonicalID
 			if key == "" {
@@ -119,22 +138,15 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 			if !seenArtifacts[key] {
 				seenArtifacts[key] = true
 				artifacts = append(artifacts, a)
+				relations = append(relations, a.Relations...)
 			}
 		}
 	}
 	var sourceRuns []kernel.SourceRun
-	var relations []kernel.Relation
 	warnings := []string{}
 	if planResult.SessionID != "" {
 		if snap, e := s.Kernel.Session(ctx, planResult.SessionID, req.Identity); e == nil {
 			sourceRuns = snap.SourceRuns
-			relations = snap.Relations
-			if len(candidates) == 0 {
-				candidates = snap.Candidates
-			}
-			if len(artifacts) == 0 {
-				artifacts = snap.Artifacts
-			}
 		}
 	}
 	for _, artifact := range artifacts {
@@ -145,15 +157,27 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 		seenArtifacts[key] = true
 	}
 	if s.Reranker != nil && len(candidates) > 1 {
+		// Execute has completed, so its final ledger state can be continued
+		// by rerank hydration without allocating a fresh budget or deadline.
+		account := budgetctl.FromState(planResult.Budget)
+		rerankCtx := budgetctl.WithAccount(ctx, account)
+		if deadline := account.Deadline(); !deadline.IsZero() {
+			var cancel context.CancelFunc
+			rerankCtx, cancel = context.WithDeadline(rerankCtx, deadline)
+			defer cancel()
+		}
 		emit(progressEvent(PhaseReranking, "正在重排高价值候选"))
-		reranked, rerankErr := s.Reranker.Rerank(ctx, req.Query, candidates)
+		reranked, rerankErr := s.Reranker.Rerank(rerankCtx, req.Query, candidates)
 		if rerankErr != nil {
 			warnings = append(warnings, "AI rerank 失败，保留确定性排序："+rerankErr.Error())
 		} else if len(reranked) == len(candidates) {
 			candidates = reranked
 			if req.Deep {
-				additional, fetchWarnings := s.fetchReranked(ctx, req, planResult.SessionID, candidates, artifacts)
+				additional, fetchWarnings := s.fetchReranked(rerankCtx, req, planResult.SessionID, candidates, artifacts)
 				warnings = append(warnings, fetchWarnings...)
+				if len(fetchWarnings) > 0 {
+					planResult.Partial = true
+				}
 				for _, artifact := range additional {
 					key := artifact.Ref.CanonicalID
 					if key == "" {
@@ -162,18 +186,26 @@ func (s Service) RunWithObserver(ctx context.Context, req Request, observer Obse
 					if !seenArtifacts[key] {
 						seenArtifacts[key] = true
 						artifacts = append(artifacts, artifact)
+						relations = append(relations, artifact.Relations...)
 					}
 				}
 			}
 		} else {
 			warnings = append(warnings, "AI rerank 返回候选数量不一致，保留确定性排序")
 		}
+		planResult.Budget = account.Snapshot()
 	}
 	cp := synthesis.CandidatePack{Query: req.Query, SessionID: planResult.SessionID, Candidates: candidates, Sources: sourceRuns}
 	ap := synthesis.ArtifactPack{SessionID: planResult.SessionID, Artifacts: artifacts, Relations: relations}
 	emit(progressEvent(PhaseEvidence, "正在提取可追溯证据"))
 	ep := synthesis.ExtractEvidence(req.Query, ap)
-	result := Result{Planner: p.Name(), Plan: plan, PlanResult: planResult, CandidatePack: cp, ArtifactPack: ap, EvidencePack: ep, Summary: synthesis.Summarize(ep), Events: events, Warnings: warnings}
+	plannerName := p.Name()
+	if plan.Metadata["fallback_from"] == plannerName {
+		if fallbackName, ok := plan.Metadata["planner"].(string); ok && fallbackName != "" {
+			plannerName = fallbackName
+		}
+	}
+	result := Result{Planner: plannerName, Plan: plan, PlanResult: planResult, CandidatePack: cp, ArtifactPack: ap, EvidencePack: ep, Summary: synthesis.Summarize(ep), Events: events, Warnings: warnings}
 	emit(progressEvent(PhaseResearchComplete, "证据包已生成"))
 	return result, nil
 }

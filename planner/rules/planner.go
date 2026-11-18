@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	"github.com/BlueSkyXN/Feishu-SuperSearch/kernel"
 	"github.com/BlueSkyXN/Feishu-SuperSearch/planner"
@@ -22,7 +23,7 @@ func (Planner) Plan(_ context.Context, r planner.UserRequest, caps kernel.Capabi
 		limit = 40
 	}
 	query := compactQuery(r.Query)
-	searchReq := kernel.SearchRequest{Query: query, SourceQueries: sourceQueries(query, sources), Sources: sources, Filters: r.Filters, Identity: r.Identity, Limit: limit, LimitPerSource: 8, Budget: r.Budget, Strategy: kernel.SearchStrategy{Fusion: "weighted_rrf", Pagination: "adaptive", SourceQuota: true}}
+	searchReq := kernel.SearchRequest{Query: r.Query, SourceQueries: sourceQueries(query, sources), Sources: sources, Filters: r.Filters, Identity: r.Identity, Limit: limit, LimitPerSource: 8, Budget: r.Budget, Strategy: kernel.SearchStrategy{Fusion: "weighted_rrf", Pagination: "adaptive", SourceQuota: true}}
 	raw, _ := json.Marshal(searchReq)
 	nodes := []kernel.PlanNode{{ID: "search", Op: kernel.PlanSearch, Request: raw, Priority: 100}}
 	output := []string{"search"}
@@ -93,6 +94,7 @@ func selectSources(q string, caps kernel.CapabilitySnapshot) []kernel.SourceID {
 func sourceQueries(query string, sources []kernel.SourceID) map[kernel.SourceID]string {
 	out := map[kernel.SourceID]string{}
 	for _, source := range sources {
+		out[source] = query
 		limit := 0
 		switch source {
 		case kernel.SourceDocs:
@@ -121,13 +123,46 @@ func containsAny(s string, terms ...string) bool {
 func compactQuery(q string) string {
 	original := strings.TrimSpace(q)
 	q = original
-	repl := []string{"请帮我", "帮我", "请", "搜索", "查找", "找一下", "总结", "分析", "告诉我", "最近两周", "最近一周", "最近一个月"}
-	for _, x := range repl {
-		q = strings.ReplaceAll(q, x, " ")
+	polite := false
+	for _, prefix := range []string{"麻烦帮我", "请帮我", "帮我"} {
+		if strings.HasPrefix(q, prefix) {
+			q = trimInstructionSeparator(strings.TrimPrefix(q, prefix))
+			polite = true
+			break
+		}
+	}
+	actions := []string{"找一下", "告诉我", "搜索", "查找", "检索", "总结", "分析"}
+	// A bare 请 can be part of 请假 or 请求. Only consume it when it
+	// introduces an explicit action; never remove words inside the query.
+	if !polite && strings.HasPrefix(q, "请") {
+		rest := trimInstructionSeparator(strings.TrimPrefix(q, "请"))
+		for _, action := range actions {
+			if strings.HasPrefix(rest, action) {
+				q, polite = rest, true
+				break
+			}
+		}
+	}
+	for _, action := range actions {
+		if rest, found := strings.CutPrefix(q, action); found && (polite || hasInstructionSeparator(rest)) {
+			q = trimInstructionSeparator(rest)
+			break
+		}
 	}
 	q = strings.Join(strings.Fields(q), " ")
 	if q == "" {
 		return original
 	}
 	return q
+}
+
+func trimInstructionSeparator(s string) string {
+	return strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsSpace(r) || r == ':' || r == '：' || r == '，' || r == ',' })
+}
+
+func hasInstructionSeparator(s string) bool {
+	for _, r := range s {
+		return unicode.IsSpace(r) || r == ':' || r == '：'
+	}
+	return false
 }
